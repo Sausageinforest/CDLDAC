@@ -12,9 +12,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Compile PKG via PSL1GHT Docker
+      - name: Compile PKG via PS3DEV Docker
         run: |
-          docker run --rm -v ${{ github.workspace }}:/src -w /src ps3dev/psl1ght make pkg
+          docker run --rm -v ${{ github.workspace }}:/build -w /build hldtux/ps3dev make pkg
 
       - name: Upload CDLDAC001.pkg Artifact
         uses: actions/upload-artifact@v4
