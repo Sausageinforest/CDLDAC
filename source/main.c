@@ -48,7 +48,8 @@ static void load_configuration(void) {
     if (fgets(line, sizeof(line), f)) {
         char ip_buf[64] = {0};
         int port = 0;
-        if (sscanf(line, "%63[^:]:%d", ip_buf, &port) == 2 ||
+        if (sscanf(line, "IP=%63[^:]:%d", ip_buf, &port) == 2 ||
+            sscanf(line, "%63[^:]:%d", ip_buf, &port) == 2 ||
             sscanf(line, "%63s %d", ip_buf, &port) == 2) {
             strncpy(s_target_ip, ip_buf, sizeof(s_target_ip) - 1);
             s_target_port = port;
@@ -94,7 +95,7 @@ int main(int argc, char *argv[]) {
     uint32_t buffered_count     = 0;
     uint64_t next_send_time     = get_time_usec();
 
-    printf("PS3 CD-DA Streamer started: %s:%d\n", s_target_ip, s_target_port);
+    printf("PS3 CD-DA Streamer started -> %s:%d\n", s_target_ip, s_target_port);
 
     while (running) {
         padInfo padinfo;
@@ -103,21 +104,33 @@ int main(int argc, char *argv[]) {
 
         if (padinfo.status[0]) {
             ioPadGetData(0, &paddata);
-            uint32_t cur_buttons = (paddata.button[2] << 8) | paddata.button[3];
+            uint32_t cur_buttons = 0;
+            if (paddata.BTN_CROSS)    cur_buttons |= (1 << 0);
+            if (paddata.BTN_START)    cur_buttons |= (1 << 1);
+            if (paddata.BTN_CIRCLE)   cur_buttons |= (1 << 2);
+            if (paddata.BTN_TRIANGLE) cur_buttons |= (1 << 3);
+            if (paddata.BTN_RIGHT)    cur_buttons |= (1 << 4);
+            if (paddata.BTN_R1)       cur_buttons |= (1 << 5);
+            if (paddata.BTN_LEFT)     cur_buttons |= (1 << 6);
+            if (paddata.BTN_L1)       cur_buttons |= (1 << 7);
+
             uint32_t pressed = cur_buttons & (~prev_buttons);
             prev_buttons = cur_buttons;
 
-            if (pressed & (PAD_CTRL_CIRCLE << 0)) {
+            /* Circle: Exit */
+            if (pressed & (1 << 2)) {
                 running = false;
                 break;
             }
 
-            if ((pressed & (PAD_CTRL_CROSS << 0)) || (pressed & (PAD_CTRL_START << 8))) {
+            /* Cross / Start: Play / Pause */
+            if (pressed & ((1 << 0) | (1 << 1))) {
                 is_paused = !is_paused;
                 next_send_time = get_time_usec();
             }
 
-            if (pressed & (PAD_CTRL_TRIANGLE << 0)) {
+            /* Triangle: Reload Disc TOC */
+            if (pressed & (1 << 3)) {
                 cdrom_close();
                 if (cdrom_init() == 0 && cdrom_read_toc(&toc) == 0 && toc.total_tracks > 0) {
                     has_disc = true;
@@ -130,7 +143,8 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            if (has_disc && ((pressed & (PAD_CTRL_RIGHT << 8)) || (pressed & (PAD_CTRL_R1 << 0)))) {
+            /* Right / R1: Next track */
+            if (has_disc && (pressed & ((1 << 4) | (1 << 5)))) {
                 if (current_track_idx + 1 < toc.total_tracks) {
                     current_track_idx++;
                     current_lba = toc.tracks[current_track_idx].start_lba;
@@ -139,7 +153,8 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            if (has_disc && ((pressed & (PAD_CTRL_LEFT << 8)) || (pressed & (PAD_CTRL_L1 << 0)))) {
+            /* Left / L1: Previous track */
+            if (has_disc && (pressed & ((1 << 6) | (1 << 7)))) {
                 uint32_t elapsed_in_track = current_lba - toc.tracks[current_track_idx].start_lba;
                 if (elapsed_in_track > (2 * 75) || current_track_idx == 0) {
                     current_lba = toc.tracks[current_track_idx].start_lba;
