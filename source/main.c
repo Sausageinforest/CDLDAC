@@ -3,31 +3,33 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <sys/time.h>
 
 #include <sys/process.h>
-#include <sys/systime.h>
 #include <net/net.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <io/pad.h>
-#include <debug_font.h>
 
 #include "cdrom.h"
 
 #define DEFAULT_IP          "192.168.1.50"
 #define DEFAULT_PORT        12345
 
-#define UDP_CHUNK_SIZE      1176  /* 2352 / 2: кратно 4 байтам на сэмпл (16 бит * 2 канала) */
-#define SECTOR_TIME_USEC    13333 /* 1000000 мкс / 75 секторов/с = 13333.33 мкс */
+#define UDP_CHUNK_SIZE      1176
+#define SECTOR_TIME_USEC    13333
 
-/* 128-байтно выровненный буфер упреждающего чтения (25 секторов) */
 static uint8_t s_read_ahead_buffer[READ_AHEAD_BUFFER_SIZE] __attribute__((aligned(128)));
-
 static char s_target_ip[64] = DEFAULT_IP;
 static int  s_target_port   = DEFAULT_PORT;
 
-/* Загрузка конфигурации из HDD или USB-накопителя */
+static inline uint64_t get_time_usec(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * 1000000ULL + tv.tv_usec;
+}
+
 static void load_configuration(void) {
     const char *paths[] = {
         "/dev_hdd0/game/CDLDAC001/USRDIR/config.txt",
@@ -38,20 +40,14 @@ static void load_configuration(void) {
     FILE *f = NULL;
     for (size_t i = 0; i < sizeof(paths)/sizeof(paths[0]); i++) {
         f = fopen(paths[i], "r");
-        if (f) {
-            break;
-        }
+        if (f) break;
     }
-
-    if (!f) {
-        return;
-    }
+    if (!f) return;
 
     char line[128];
     if (fgets(line, sizeof(line), f)) {
         char ip_buf[64] = {0};
         int port = 0;
-        /* Поддержка форматов IP:PORT либо IP PORT */
         if (sscanf(line, "%63[^:]:%d", ip_buf, &port) == 2 ||
             sscanf(line, "%63s %d", ip_buf, &port) == 2) {
             strncpy(s_target_ip, ip_buf, sizeof(s_target_ip) - 1);
@@ -61,56 +57,15 @@ static void load_configuration(void) {
     fclose(f);
 }
 
-/* Отрисовка текстового дашборда на экран */
-static void render_status(const char *drive_status,
-                          int current_track,
-                          int total_tracks,
-                          uint32_t track_sec,
-                          uint32_t track_total_sec,
-                          bool is_paused) {
-    DPRINTF("\033[2J\033[H"); /* Очистка экрана и сброс курсора */
-    DPRINTF("=====================================================\n");
-    DPRINTF("       PS3 Audio CD (CD-DA) -> LDAC UDP Streamer     \n");
-    DPRINTF("=====================================================\n\n");
-    DPRINTF(" Destination:     %s:%d\n", s_target_ip, s_target_port);
-    DPRINTF(" Drive Status:    %s\n", drive_status);
-
-    if (total_tracks > 0) {
-        DPRINTF(" Track:           %d / %d\n", current_track, total_tracks);
-        DPRINTF(" Track Time:      %02d:%02d / %02d:%02d\n",
-                track_sec / 60, track_sec % 60,
-                track_total_sec / 60, track_total_sec % 60);
-        DPRINTF(" Playback State:  [%s]\n", is_paused ? "PAUSED" : "STREAMING");
-    } else {
-        DPRINTF(" Tracks:          No CD-DA tracks detected\n");
-    }
-
-    DPRINTF("\n-----------------------------------------------------\n");
-    DPRINTF(" Controls:\n");
-    DPRINTF("  [X] / [START]  - Play / Pause\n");
-    DPRINTF("  [Right] / [R1] - Next Track\n");
-    DPRINTF("  [Left]  / [L1] - Previous Track\n");
-    DPRINTF("  [TRIANGLE]     - Rescan Disc / Reload TOC\n");
-    DPRINTF("  [CIRCLE]       - Exit to XMB\n");
-    DPRINTF("=====================================================\n");
-}
-
 int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
 
-    init_debug_font();
     load_configuration();
-
-    /* Инициализация сетевого стека */
     netInitialize();
+
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) {
-        DPRINTF("Error: Failed to create UDP socket!\n");
-        sysUsleep(3000000);
-        term_debug_font();
-        return -1;
-    }
+    if (sock < 0) return -1;
 
     struct sockaddr_in dest_addr;
     memset(&dest_addr, 0, sizeof(dest_addr));
@@ -118,7 +73,6 @@ int main(int argc, char *argv[]) {
     dest_addr.sin_port        = htons(s_target_port);
     dest_addr.sin_addr.s_addr = inet_addr(s_target_ip);
 
-    /* Инициализация первого геймпада DualShock 3 */
     ioPadInit(7);
 
     cd_toc_t toc;
@@ -136,22 +90,13 @@ int main(int argc, char *argv[]) {
     bool running          = true;
 
     uint32_t prev_buttons = 0;
-    uint64_t last_ui_update = 0;
-
-    /* Переменные для буфера упреждающего чтения */
     uint32_t buffered_lba_start = 0;
     uint32_t buffered_count     = 0;
-    uint32_t next_send_time     = sysGetSystemTime();
+    uint64_t next_send_time     = get_time_usec();
 
-    render_status(has_disc ? "Disc Mounted (CD-DA)" : "No Disc / Read Error",
-                  has_disc ? (current_track_idx + 1) : 0,
-                  has_disc ? toc.total_tracks : 0,
-                  0,
-                  has_disc ? toc.tracks[current_track_idx].duration_sec : 0,
-                  is_paused);
+    printf("PS3 CD-DA Streamer started: %s:%d\n", s_target_ip, s_target_port);
 
     while (running) {
-        /* Опрос геймпада */
         padInfo padinfo;
         padData paddata;
         ioPadGetInfo(&padinfo);
@@ -162,19 +107,16 @@ int main(int argc, char *argv[]) {
             uint32_t pressed = cur_buttons & (~prev_buttons);
             prev_buttons = cur_buttons;
 
-            /* Circle: Выход в XMB */
             if (pressed & (PAD_CTRL_CIRCLE << 0)) {
                 running = false;
                 break;
             }
 
-            /* Cross или Start: Пауза / Воспроизведение */
             if ((pressed & (PAD_CTRL_CROSS << 0)) || (pressed & (PAD_CTRL_START << 8))) {
                 is_paused = !is_paused;
-                next_send_time = sysGetSystemTime();
+                next_send_time = get_time_usec();
             }
 
-            /* Triangle: Перечитать диск и обновить TOC */
             if (pressed & (PAD_CTRL_TRIANGLE << 0)) {
                 cdrom_close();
                 if (cdrom_init() == 0 && cdrom_read_toc(&toc) == 0 && toc.total_tracks > 0) {
@@ -188,20 +130,17 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            /* D-Pad Right или R1: Следующий трек */
             if (has_disc && ((pressed & (PAD_CTRL_RIGHT << 8)) || (pressed & (PAD_CTRL_R1 << 0)))) {
                 if (current_track_idx + 1 < toc.total_tracks) {
                     current_track_idx++;
                     current_lba = toc.tracks[current_track_idx].start_lba;
                     buffered_count = 0;
-                    next_send_time = sysGetSystemTime();
+                    next_send_time = get_time_usec();
                 }
             }
 
-            /* D-Pad Left или L1: Предыдущий трек */
             if (has_disc && ((pressed & (PAD_CTRL_LEFT << 8)) || (pressed & (PAD_CTRL_L1 << 0)))) {
                 uint32_t elapsed_in_track = current_lba - toc.tracks[current_track_idx].start_lba;
-                /* Если от начала трека прошло больше 2 сек, прыгаем в начало текущего, иначе на предыдущий */
                 if (elapsed_in_track > (2 * 75) || current_track_idx == 0) {
                     current_lba = toc.tracks[current_track_idx].start_lba;
                 } else {
@@ -209,13 +148,11 @@ int main(int argc, char *argv[]) {
                     current_lba = toc.tracks[current_track_idx].start_lba;
                 }
                 buffered_count = 0;
-                next_send_time = sysGetSystemTime();
+                next_send_time = get_time_usec();
             }
         }
 
-        /* Логика воспроизведения и стриминга */
         if (has_disc && !is_paused) {
-            /* Проверка перехода за пределы текущего трека */
             uint32_t track_end_lba = (current_track_idx == toc.total_tracks - 1)
                                      ? toc.leadout_lba
                                      : toc.tracks[current_track_idx + 1].start_lba;
@@ -226,7 +163,6 @@ int main(int argc, char *argv[]) {
                     current_lba = toc.tracks[current_track_idx].start_lba;
                     buffered_count = 0;
                 } else {
-                    /* Конец диска: переход в режим паузы на первый трек */
                     current_track_idx = 0;
                     current_lba = toc.tracks[0].start_lba;
                     is_paused = true;
@@ -235,7 +171,6 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            /* Проверка необходимости пополнения упреждающего буфера */
             if (buffered_count == 0 ||
                 current_lba < buffered_lba_start ||
                 current_lba >= (buffered_lba_start + buffered_count)) {
@@ -251,77 +186,39 @@ int main(int argc, char *argv[]) {
                         buffered_lba_start = current_lba;
                         buffered_count     = sectors_to_read;
                     } else {
-                        /* Ошибка чтения привода: пауза */
                         is_paused = true;
-                        sysUsleep(100000);
+                        usleep(100000);
                         continue;
                     }
                 }
             }
 
-            /* Извлечение текущего сектора из буфера упреждающего чтения */
             uint32_t sector_offset = (current_lba - buffered_lba_start) * CDDA_SECTOR_SIZE;
             uint8_t *sector_ptr    = &s_read_ahead_buffer[sector_offset];
 
-            /*
-             * Отправка сектора 2352 байта двумя UDP пакетами по 1176 байт
-             * (гарантированный размер без фрагментации в MTU 1500).
-             */
             sendto(sock, sector_ptr, UDP_CHUNK_SIZE, 0,
                    (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-
             sendto(sock, sector_ptr + UDP_CHUNK_SIZE, UDP_CHUNK_SIZE, 0,
                    (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 
             current_lba++;
 
-            /*
-             * Прецизионный пейсинг (Pacing):
-             * Шаг таймера ровно 13333 мкс на сектор (75 секторов/сек).
-             */
             next_send_time += SECTOR_TIME_USEC;
-            uint64_t now = sysGetSystemTime();
+            uint64_t now = get_time_usec();
 
             if (next_send_time > now) {
-                sysUsleep(next_send_time - now);
+                usleep(next_send_time - now);
             } else if (now > next_send_time + 100000) {
-                /* Защита от накопленного отставания таймера при задержке чтения привода */
                 next_send_time = now;
             }
         } else {
-            /* При паузе или отсутствии диска не нагружаем процессор */
-            sysUsleep(16000);
-        }
-
-        /* Обновление интерфейса раз в 500 мс */
-        uint64_t current_time = sysGetSystemTime();
-        if (current_time - last_ui_update >= 500000) {
-            last_ui_update = current_time;
-
-            uint32_t track_sec = 0;
-            uint32_t track_dur = 0;
-
-            if (has_disc && current_track_idx < toc.total_tracks) {
-                track_sec = (current_lba > toc.tracks[current_track_idx].start_lba)
-                            ? (current_lba - toc.tracks[current_track_idx].start_lba) / 75
-                            : 0;
-                track_dur = toc.tracks[current_track_idx].duration_sec;
-            }
-
-            render_status(has_disc ? "Disc Mounted (CD-DA)" : "No Disc / Read Error",
-                          has_disc ? (current_track_idx + 1) : 0,
-                          has_disc ? toc.total_tracks : 0,
-                          track_sec,
-                          track_dur,
-                          is_paused);
+            usleep(16000);
         }
     }
 
-    /* Корректное освобождение ресурсов */
     cdrom_close();
     close(sock);
     netDeinitialize();
-    term_debug_font();
     sysProcessExit(0);
     return 0;
 }

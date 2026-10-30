@@ -28,7 +28,7 @@ CXXFLAGS    := $(CFLAGS)
 INCLUDES    := -Iinclude -I$(PSL1GHT)/target/include -I$(PS3DEV)/portlibs/ppu/include
 
 LIBDIRS     := -L$(PSL1GHT)/target/lib -L$(PS3DEV)/portlibs/ppu/lib
-LIBS        := -ldebugfont -lio -lnet -lsysnet -lsysutil -llv2
+LIBS        := -lio -lnet -lsysnet -lsysutil -llv2
 
 CFILES      := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 OBJS        := $(addprefix $(BUILD)/, $(CFILES:.c=.o))
