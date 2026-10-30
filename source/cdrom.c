@@ -20,7 +20,7 @@ static inline uint64_t lv2syscall1(uint64_t nr, uint64_t a1) {
         "sc 2"
         : "+r"(r3)
         : "r"(r11)
-        : "r0", "r2", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory"
+        : "r0", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory"
     );
     return r3;
 }
@@ -35,7 +35,7 @@ static inline uint64_t lv2syscall4(uint64_t nr, uint64_t a1, uint64_t a2, uint64
         "sc 2"
         : "+r"(r3)
         : "r"(r11), "r"(r4), "r"(r5), "r"(r6)
-        : "r0", "r2", "r7", "r8", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory"
+        : "r0", "r7", "r8", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory"
     );
     return r3;
 }
@@ -52,7 +52,7 @@ static inline uint64_t lv2syscall6(uint64_t nr, uint64_t a1, uint64_t a2, uint64
         "sc 2"
         : "+r"(r3)
         : "r"(r11), "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8)
-        : "r0", "r2", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory"
+        : "r0", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory"
     );
     return r3;
 }
