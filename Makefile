@@ -10,50 +10,29 @@ endif
 TITLE       := PS3 CD-DA Streamer
 APPID       := CDLDAC001
 CONTENTID   := UP0001-$(APPID)_00-0000000000000000
+ICON0       := $(CURDIR)/ICON0.PNG
 
 include $(PSL1GHT)/ppu_rules
 
 TARGET      := CDLDAC001
-BUILD       := build
-SOURCES     := source
-INCLUDES    := source
+OBJS        := source/cdrom.o source/main.o
 
-CFLAGS      = -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
-CXXFLAGS    = $(CFLAGS)
-LDFLAGS     = $(MACHDEP) -Wl,-Map,$(notdir $@).map
+CFLAGS      = -O2 -Wall -mcpu=cell $(MACHDEP) -Isource $(LIBPSL1GHT_INC)
+LDFLAGS     = $(MACHDEP)
 LIBS        := -lio -lnet -lsysutil -lsysmodule -llv2
 
-ifneq ($(BUILD),$(notdir $(CURDIR)))
+.PHONY: all pkg clean
 
-export OUTPUT   := $(CURDIR)/$(TARGET)
-export VPATH    := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir))
-export DEPSDIR  := $(CURDIR)/$(BUILD)
-export BUILDDIR := $(CURDIR)/$(BUILD)
+all: $(TARGET).self
+pkg: $(TARGET).pkg
 
-CFILES      := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
-export LD   := $(CC)
-export OFILES := $(CFILES:.c=.o)
-export INCLUDE := $(foreach dir,$(INCLUDES), -I$(CURDIR)/$(dir)) $(LIBPSL1GHT_INC)
-export LIBPATHS := $(LIBPSL1GHT_LIB)
+source/%.o: source/%.c
+	@echo "CC $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
-.PHONY: $(BUILD) clean pkg
-
-$(BUILD):
-	@[ -d $@ ] || mkdir -p $@
-	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+$(TARGET).elf: $(OBJS)
+	@echo "LD $@"
+	@$(CC) $(LDFLAGS) $(OBJS) $(LIBPSL1GHT_LIB) $(LIBS) -o $@
 
 clean:
-	@rm -rf $(BUILD) *.elf *.self *.pkg
-
-pkg: $(BUILD) $(OUTPUT).pkg
-
-else
-
-DEPENDS := $(OFILES:.o=.d)
-
-$(OUTPUT).self: $(OUTPUT).elf
-$(OUTPUT).elf: $(OFILES)
-
--include $(DEPENDS)
-
-endif
+	@rm -rf source/*.o $(TARGET).elf $(TARGET).self $(TARGET).pkg build

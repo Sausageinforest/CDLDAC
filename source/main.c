@@ -5,7 +5,6 @@
 #include <stdbool.h>
 #include <sys/time.h>
 
-#include <sys/process.h>
 #include <net/net.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -13,6 +12,8 @@
 #include <io/pad.h>
 
 #include "cdrom.h"
+
+extern void sysProcessExit(int status);
 
 #define DEFAULT_IP          "192.168.1.50"
 #define DEFAULT_PORT        12345
@@ -117,19 +118,16 @@ int main(int argc, char *argv[]) {
             uint32_t pressed = cur_buttons & (~prev_buttons);
             prev_buttons = cur_buttons;
 
-            /* Circle: Exit */
             if (pressed & (1 << 2)) {
                 running = false;
                 break;
             }
 
-            /* Cross / Start: Play / Pause */
             if (pressed & ((1 << 0) | (1 << 1))) {
                 is_paused = !is_paused;
                 next_send_time = get_time_usec();
             }
 
-            /* Triangle: Reload Disc TOC */
             if (pressed & (1 << 3)) {
                 cdrom_close();
                 if (cdrom_init() == 0 && cdrom_read_toc(&toc) == 0 && toc.total_tracks > 0) {
@@ -143,7 +141,6 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            /* Right / R1: Next track */
             if (has_disc && (pressed & ((1 << 4) | (1 << 5)))) {
                 if (current_track_idx + 1 < toc.total_tracks) {
                     current_track_idx++;
@@ -153,7 +150,6 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            /* Left / L1: Previous track */
             if (has_disc && (pressed & ((1 << 6) | (1 << 7)))) {
                 uint32_t elapsed_in_track = current_lba - toc.tracks[current_track_idx].start_lba;
                 if (elapsed_in_track > (2 * 75) || current_track_idx == 0) {
