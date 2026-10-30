@@ -1,0 +1,24 @@
+name: Build PS3 PKG
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Compile PKG via PSL1GHT Docker
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/src -w /src ps3dev/psl1ght make pkg
+
+      - name: Upload CDLDAC001.pkg Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CDLDAC001-pkg
+          path: CDLDAC001.pkg
+          if-no-files-found: error
