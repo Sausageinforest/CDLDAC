@@ -3,8 +3,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <stdarg.h>
 #include <sys/time.h>
 
+#include <sysmodule/sysmodule.h>
 #include <net/net.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -17,13 +19,28 @@ extern void sysProcessExit(int status);
 
 #define DEFAULT_IP          "192.168.1.50"
 #define DEFAULT_PORT        12345
-
 #define UDP_CHUNK_SIZE      1176
 #define SECTOR_TIME_USEC    13333
 
 static uint8_t s_read_ahead_buffer[READ_AHEAD_BUFFER_SIZE] __attribute__((aligned(128)));
 static char s_target_ip[64] = DEFAULT_IP;
 static int  s_target_port   = DEFAULT_PORT;
+static FILE *s_log_file     = NULL;
+
+static void log_write(const char *fmt, ...) {
+    if (!s_log_file) {
+        s_log_file = fopen("/dev_usb000/cdldac.log", "w");
+        if (!s_log_file) s_log_file = fopen("/dev_usb001/cdldac.log", "w");
+        if (!s_log_file) s_log_file = fopen("/dev_hdd0/cdldac.log", "w");
+    }
+    if (s_log_file) {
+        va_list args;
+        va_start(args, fmt);
+        vfprintf(s_log_file, fmt, args);
+        va_end(args);
+        fflush(s_log_file);
+    }
+}
 
 static inline uint64_t get_time_usec(void) {
     struct timeval tv;
@@ -33,17 +50,23 @@ static inline uint64_t get_time_usec(void) {
 
 static void load_configuration(void) {
     const char *paths[] = {
-        "/dev_hdd0/game/CDLDAC001/USRDIR/config.txt",
         "/dev_usb000/config.txt",
-        "/dev_usb001/config.txt"
+        "/dev_usb001/config.txt",
+        "/dev_hdd0/game/CDLDAC001/USRDIR/config.txt"
     };
 
     FILE *f = NULL;
     for (size_t i = 0; i < sizeof(paths)/sizeof(paths[0]); i++) {
         f = fopen(paths[i], "r");
-        if (f) break;
+        if (f) {
+            log_write("[CONFIG] Found file at %s\n", paths[i]);
+            break;
+        }
     }
-    if (!f) return;
+    if (!f) {
+        log_write("[CONFIG] Not found, using default %s:%d\n", s_target_ip, s_target_port);
+        return;
+    }
 
     char line[128];
     if (fgets(line, sizeof(line), f)) {
@@ -57,17 +80,32 @@ static void load_configuration(void) {
         }
     }
     fclose(f);
+    log_write("[CONFIG] Loaded target %s:%d\n", s_target_ip, s_target_port);
 }
 
 int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
 
+    log_write("=== PS3 CD-DA Streamer Starting ===\n");
+
+    /* Загрузка системных модулей сети и ввода */
+    sysModuleLoad(SYSMODULE_NET);
+    sysModuleLoad(SYSMODULE_IO);
+
     load_configuration();
-    netInitialize();
+
+    /* Сеть */
+    int net_init_res = netInitialize();
+    log_write("[NET] netInitialize returned: %d\n", net_init_res);
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) return -1;
+    log_write("[NET] socket created: %d\n", sock);
+    if (sock < 0) {
+        log_write("[FATAL] socket creation failed!\n");
+        sleep(5);
+        return -1;
+    }
 
     struct sockaddr_in dest_addr;
     memset(&dest_addr, 0, sizeof(dest_addr));
@@ -75,15 +113,29 @@ int main(int argc, char *argv[]) {
     dest_addr.sin_port        = htons(s_target_port);
     dest_addr.sin_addr.s_addr = inet_addr(s_target_ip);
 
-    ioPadInit(7);
+    /* Геймпад */
+    int pad_res = ioPadInit(7);
+    log_write("[PAD] ioPadInit returned: %d\n", pad_res);
+
+    /* Привод Blu-ray / CD */
+    log_write("[CD] Initializing BDVD storage device (0x%llx)...\n", (unsigned long long)BDVD_DEV_ID);
+    int cd_res = cdrom_init();
+    log_write("[CD] cdrom_init returned: %d\n", cd_res);
 
     cd_toc_t toc;
+    memset(&toc, 0, sizeof(toc));
     bool has_disc = false;
 
-    if (cdrom_init() == 0) {
-        if (cdrom_read_toc(&toc) == 0 && toc.total_tracks > 0) {
+    if (cd_res == 0) {
+        int toc_res = cdrom_read_toc(&toc);
+        log_write("[CD] cdrom_read_toc returned: %d, total tracks: %d\n", toc_res, (int)toc.total_tracks);
+        if (toc_res == 0 && toc.total_tracks > 0) {
             has_disc = true;
+            log_write("[CD] Audio CD ready: %d tracks, first LBA: %u, leadout LBA: %u\n",
+                      toc.total_tracks, toc.tracks[0].start_lba, toc.leadout_lba);
         }
+    } else {
+        log_write("[CD] WARNING: Could not open BDVD drive!\n");
     }
 
     int current_track_idx = 0;
@@ -95,16 +147,21 @@ int main(int argc, char *argv[]) {
     uint32_t buffered_lba_start = 0;
     uint32_t buffered_count     = 0;
     uint64_t next_send_time     = get_time_usec();
+    uint64_t start_time         = next_send_time;
+    uint32_t sectors_sent       = 0;
 
-    printf("PS3 CD-DA Streamer started -> %s:%d\n", s_target_ip, s_target_port);
+    log_write("[LOOP] Entering streaming loop...\n");
 
     while (running) {
         padInfo padinfo;
-        padData paddata;
+        memset(&padinfo, 0, sizeof(padinfo));
         ioPadGetInfo(&padinfo);
 
         if (padinfo.status[0]) {
+            padData paddata;
+            memset(&paddata, 0, sizeof(paddata));
             ioPadGetData(0, &paddata);
+
             uint32_t cur_buttons = 0;
             if (paddata.BTN_CROSS)    cur_buttons |= (1 << 0);
             if (paddata.BTN_START)    cur_buttons |= (1 << 1);
@@ -118,17 +175,23 @@ int main(int argc, char *argv[]) {
             uint32_t pressed = cur_buttons & (~prev_buttons);
             prev_buttons = cur_buttons;
 
-            if (pressed & (1 << 2)) {
-                running = false;
-                break;
+            /* Защита от случайного выхода в первые 3 секунды */
+            if ((get_time_usec() - start_time) > 3000000ULL) {
+                if (pressed & (1 << 2)) {
+                    log_write("[PAD] Circle pressed: exiting to XMB...\n");
+                    running = false;
+                    break;
+                }
             }
 
             if (pressed & ((1 << 0) | (1 << 1))) {
                 is_paused = !is_paused;
+                log_write("[PLAY] Play/Pause toggled: %s\n", is_paused ? "PAUSED" : "PLAYING");
                 next_send_time = get_time_usec();
             }
 
             if (pressed & (1 << 3)) {
+                log_write("[CD] Reloading TOC...\n");
                 cdrom_close();
                 if (cdrom_init() == 0 && cdrom_read_toc(&toc) == 0 && toc.total_tracks > 0) {
                     has_disc = true;
@@ -197,6 +260,7 @@ int main(int argc, char *argv[]) {
                         buffered_lba_start = current_lba;
                         buffered_count     = sectors_to_read;
                     } else {
+                        log_write("[CD] Read error at LBA %u (code: %d)\n", current_lba, read_res);
                         is_paused = true;
                         usleep(100000);
                         continue;
@@ -213,6 +277,11 @@ int main(int argc, char *argv[]) {
                    (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 
             current_lba++;
+            sectors_sent++;
+
+            if (sectors_sent % 300 == 0) {
+                log_write("[STREAM] Sent %u sectors (~%u sec of audio)\n", sectors_sent, sectors_sent / 75);
+            }
 
             next_send_time += SECTOR_TIME_USEC;
             uint64_t now = get_time_usec();
@@ -227,9 +296,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    log_write("[EXIT] Shutting down...\n");
     cdrom_close();
     close(sock);
     netDeinitialize();
+    if (s_log_file) fclose(s_log_file);
     sysProcessExit(0);
     return 0;
 }
