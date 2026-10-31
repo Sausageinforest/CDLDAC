@@ -15,14 +15,15 @@ jobs:
       - name: Compile PKG via PS3DEV Docker
         run: |
           docker run --rm -v ${{ github.workspace }}:/build -w /build hldtux/ps3dev make pkg
-          cp CDLDAC001.self EBOOT.BIN
+          mkdir -p CDLDAC001/USRDIR
+          cp build/pkg/PARAM.SFO CDLDAC001/
+          cp build/pkg/ICON0.PNG CDLDAC001/
+          cp build/pkg/USRDIR/EBOOT.BIN CDLDAC001/USRDIR/
+          echo "192.168.1.50:12345" > CDLDAC001/USRDIR/config.txt
 
-      - name: Upload Artifacts
+      - name: Upload Installed Folder
         uses: actions/upload-artifact@v4
         with:
-          name: CDLDAC-binaries
-          path: |
-            EBOOT.BIN
-            CDLDAC001.self
-            CDLDAC001.pkg
+          name: CDLDAC001-folder
+          path: CDLDAC001
           if-no-files-found: error
