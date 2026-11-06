@@ -43,16 +43,18 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.2
-          name: "PS3 Audiophile CD Player v1.0.2 (CDPL00001)"
+          tag_name: v1.0.3
+          name: "PS3 Audiophile CD Player v1.0.3 (CDPL00001)"
           body: |
             Official PSL1GHT build of PS3 Audiophile CD Player homebrew (TitleID: CDPL00001).
 
-            ### Fixes in v1.0.2
-            - Fixed "Corrupted Data" error in XMB by regenerating valid 1040-byte PARAM.SFO (CATEGORY: HG, BOOTABLE: 1, ATTRIBUTE: 0)
-            - Fixed packaging with proper NPDRM Free DRM EBOOT.BIN
-            - Both Debug PKG (`CDPL00001.pkg`) and Finalized PKG (`CDPL00001.gnpdrm.pkg`) provided
-            - Added `CDPL00001-folder.zip` for direct copy to `/dev_hdd0/game/CDPL00001/` via FTP or multiMAN
+            ### Fixes & Diagnostics in v1.0.3
+            - Added **Multi-Destination Instant-Sync Logger** (`logger.c`):
+              * Writes and fsyncs every step immediately to `/dev_usb000/cdplayer.log`, `/dev_usb001/cdplayer.log`, `/dev_hdd0/tmp/cdplayer.log`, and `/dev_hdd0/game/CDPL00001/debug.log`.
+              * Allows reading startup diagnostics directly by plugging the USB flash drive into a PC.
+            - Removed unneeded PRX `sysModuleLoad` calls that trigger fatal errors on built-in services.
+            - Added safe mutex attribute zeroing and audio port configuration with `AUDIO_PORT_INITLEVEL`.
+            - Checkpoints added for all 6 subsystems (Input, Network, Visualizer, Tiny3D, CD Drive, Audio Thread).
           files: |
             CDPL00001.pkg
             CDPL00001.gnpdrm.pkg

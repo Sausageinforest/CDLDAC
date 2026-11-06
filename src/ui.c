@@ -45,7 +45,10 @@ static void format_time(uint32_t ms, char *buf, size_t buf_sz) {
     snprintf(buf, buf_sz, "%02u:%02u", minutes, seconds);
 }
 
+#include "logger.h"
+
 int ui_init(void) {
+    log_write("[UI] ui_init starting...\n");
     memset(&s_ui_state, 0, sizeof(s_ui_state));
     s_ui_state.screen_width = 848;
     s_ui_state.screen_height = 512;
@@ -57,7 +60,9 @@ int ui_init(void) {
     s_ui_state.is_720p = false;
 
 #if defined(__PS3__) || defined(__PPU__)
-    tiny3d_Init(1024 * 1024);
+    log_write("[UI] Calling tiny3d_Init(1024*1024)...\n");
+    int tres = tiny3d_Init(1024 * 1024);
+    log_write("[UI] tiny3d_Init returned: %d\n", tres);
     tiny3d_Project2D();
     s_ps3_gfx_ready = 1;
 #endif
@@ -65,20 +70,24 @@ int ui_init(void) {
     /* Load default cover image */
     int comp = 0;
     const char *cover_file = "/dev_hdd0/game/CDPL00001/USRDIR/assets/default_cover.png";
+    log_write("[UI] Checking default cover at %s\n", cover_file);
     FILE *f = fopen(cover_file, "rb");
     if (!f) {
         cover_file = "./assets/default_cover.png";
+        log_write("[UI] Falling back to local %s\n", cover_file);
     } else {
         fclose(f);
     }
 
+    log_write("[UI] Decoding cover with stbi_load...\n");
     s_default_cover_pixels = stbi_load(cover_file, &s_default_cover_w, &s_default_cover_h, &comp, 4);
     if (s_default_cover_pixels) {
-        printf("[UI] Loaded default cover: %dx%d\n", s_default_cover_w, s_default_cover_h);
+        log_write("[UI] Loaded default cover: %dx%d\n", s_default_cover_w, s_default_cover_h);
     } else {
-        printf("[UI] Warning: Default cover not found at %s\n", cover_file);
+        log_write("[UI] Warning: Default cover not loaded from %s\n", cover_file);
     }
 
+    log_write("[UI] ui_init finished successfully.\n");
     return 0;
 }
 

@@ -13,9 +13,10 @@
 #include "input.h"
 #include "ui.h"
 
+#include "logger.h"
+
 #if defined(__PS3__) || defined(__PPU__)
 #include <sys/process.h>
-#include <sysmodule/sysmodule.h>
 #endif
 
 static cd_toc_t g_toc;
@@ -25,26 +26,6 @@ static album_metadata_t g_meta;
 static visualizer_t g_vis;
 static bool g_has_disc = false;
 static char g_status_msg[512] = "Initializing PS3 CD Player...";
-static FILE *g_log_file = NULL;
-
-static void log_write(const char *fmt, ...) {
-    if (!g_log_file) {
-        g_log_file = fopen("/dev_hdd0/game/CDPL00001/debug.log", "a");
-        if (!g_log_file) g_log_file = fopen("/dev_usb000/cdplayer.log", "a");
-        if (!g_log_file) g_log_file = fopen("/dev_usb001/cdplayer.log", "a");
-    }
-    va_list args;
-    va_start(args, fmt);
-    vprintf(fmt, args);
-    va_end(args);
-
-    if (g_log_file) {
-        va_start(args, fmt);
-        vfprintf(g_log_file, fmt, args);
-        va_end(args);
-        fflush(g_log_file);
-    }
-}
 
 static void load_current_disc(void) {
     log_write("[MAIN] Reading disc TOC...\n");
@@ -81,46 +62,42 @@ int main(int argc, char *argv[]) {
 
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    log_write("===================================================\n");
+    log_write("\n\n===================================================\n");
     log_write("   PS3 AUDIOPHILE CD PLAYER (TitleID: CDPL00001)   \n");
     log_write("===================================================\n");
 
-#if defined(__PS3__) || defined(__PPU__)
-    log_write("[SYS] Loading system PRX modules...\n");
-    sysModuleLoad(SYSMODULE_NET);
-    sysModuleLoad(SYSMODULE_IO);
-    sysModuleLoad(SYSMODULE_AUDIO);
-    sysModuleLoad(SYSMODULE_GCM_SYS);
-    sysModuleLoad(SYSMODULE_SYSUTIL);
-    log_write("[SYS] Modules loaded.\n");
-#endif
-
     /* 1. Subsystem Initialization */
-    log_write("[INIT] Initializing Controller Input...\n");
+    log_write("[INIT 1/6] Initializing Controller Input (ioPadInit)...\n");
     input_init();
+    log_write("[INIT 1/6] Controller Input initialized.\n");
 
-    log_write("[INIT] Initializing Metadata & Network...\n");
+    log_write("[INIT 2/6] Initializing Metadata & Network (netInitialize)...\n");
     metadata_init();
+    log_write("[INIT 2/6] Metadata & Network initialized.\n");
 
-    log_write("[INIT] Initializing Visualizer FFT...\n");
+    log_write("[INIT 3/6] Initializing Visualizer FFT...\n");
     visualizer_init(&g_vis);
+    log_write("[INIT 3/6] Visualizer FFT initialized.\n");
 
-    log_write("[INIT] Initializing UI Graphics (Tiny3D)...\n");
+    log_write("[INIT 4/6] Initializing UI Graphics (Tiny3D)...\n");
     ui_init();
+    log_write("[INIT 4/6] UI Graphics initialized.\n");
 
-    log_write("[INIT] Initializing BDVD / CD Drive...\n");
+    log_write("[INIT 5/6] Initializing BDVD / CD Drive (LV2 Storage)...\n");
     if (cd_drive_init() == 0) {
         log_write("[MAIN] CD Drive opened successfully\n");
     } else {
         log_write("[MAIN] CD Drive open returned error (no disc or no access)\n");
     }
 
-    log_write("[INIT] Initializing Audio Engine...\n");
+    log_write("[INIT 6/6] Initializing Audio Engine (audioInit & Thread)...\n");
     audio_engine_init(NULL);
+    log_write("[INIT 6/6] Audio Engine initialized.\n");
 
     /* 2. Initial Disc Detection */
     log_write("[MAIN] Polling disc status...\n");
     cd_drive_status_t cd_st = cd_drive_poll_status();
+    log_write("[MAIN] Disc status: %d (0=NoDisc, 1=Ready, 2=Busy, 3=Error)\n", (int)cd_st);
     if (cd_st == CD_STATUS_READY) {
         load_current_disc();
         /* Auto-play track 1 on launch */
@@ -256,11 +233,6 @@ int main(int argc, char *argv[]) {
     input_shutdown();
 
 #if defined(__PS3__) || defined(__PPU__)
-    sysModuleUnload(SYSMODULE_SYSUTIL);
-    sysModuleUnload(SYSMODULE_GCM_SYS);
-    sysModuleUnload(SYSMODULE_AUDIO);
-    sysModuleUnload(SYSMODULE_IO);
-    sysModuleUnload(SYSMODULE_NET);
     sysProcessExit(0);
 #endif
 

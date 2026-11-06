@@ -27,6 +27,8 @@
 #define HTTP_RECV_BUF_SIZE 16384
 #define HTTP_MAX_REDIRECTS 5
 
+#include "logger.h"
+
 static const char *get_cache_dir(void) {
 #if defined(__PS3__) || defined(__PPU__)
     return CACHE_BASE_PATH_PS3;
@@ -37,14 +39,18 @@ static const char *get_cache_dir(void) {
 
 static void ensure_cache_dir(void) {
     const char *dir = get_cache_dir();
+    log_write("[META] Ensuring cache directory: %s\n", dir);
     mkdir(dir, 0777);
 }
 
 int metadata_init(void) {
+    log_write("[META] metadata_init starting...\n");
 #if defined(__PS3__) || defined(__PPU__)
-    netInitialize();
+    s32 n_ret = netInitialize();
+    log_write("[META] netInitialize returned: %d\n", n_ret);
 #endif
     ensure_cache_dir();
+    log_write("[META] metadata_init completed\n");
     return 0;
 }
 

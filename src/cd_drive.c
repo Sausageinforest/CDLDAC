@@ -64,19 +64,21 @@ void cd_lba_to_msf(uint32_t lba, uint8_t *m, uint8_t *s, uint8_t *f) {
     if (m) *m = total_frames / 60;
 }
 
+#include "logger.h"
+
 int cd_drive_init(void) {
 #if defined(__PS3__) || defined(__PPU__)
     if (s_device_handle != 0) return 0;
     uint32_t handle = 0;
+    log_write("[CD_DRIVE] Calling sys_storage_open(0x%llX)...\n", (unsigned long long)BDVD_DEV_ID);
     int ret = (int)sys_storage_open(BDVD_DEV_ID, 0, &handle, 0);
+    log_write("[CD_DRIVE] sys_storage_open returned: 0x%08X, handle: 0x%08X\n", ret, handle);
     if (ret != 0) {
-        printf("[CD_DRIVE] Failed to open BDVD device: 0x%08X\n", ret);
         s_device_handle = 0;
         s_drive_status = CD_STATUS_NO_DISC;
         return -1;
     }
     s_device_handle = handle;
-    printf("[CD_DRIVE] Successfully opened BDVD device (handle: 0x%08X)\n", s_device_handle);
     s_drive_status = CD_STATUS_READY;
     return 0;
 #else

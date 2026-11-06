@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include "logger.h"
 
 #if defined(__PS3__) || defined(__PPU__)
 #include <sys/thread.h>
@@ -21,6 +22,7 @@ typedef sys_mutex_t ps_mutex_t;
 
 static inline void ps_mutex_init(ps_mutex_t *m) {
     sys_mutex_attr_t attr;
+    memset(&attr, 0, sizeof(attr));
     sysMutexAttrInitialize(attr);
     sysMutexCreate(m, &attr);
 }
@@ -178,11 +180,14 @@ static void *audio_thread_worker(void *arg)
     uint8_t play_chunk[AUDIO_BYTES_PER_BLOCK];
 
 #ifdef HAVE_PSL1GHT_AUDIO
+    log_write("[AUDIO_THREAD] Worker thread started\n");
     audioPortParam params;
     audioPortConfig config;
+    memset(&params, 0, sizeof(params));
+    memset(&config, 0, sizeof(config));
     params.numChannels = AUDIO_PORT_2CH;
     params.numBlocks = AUDIO_BLOCK_8;
-    params.attrib = 0;
+    params.attrib = AUDIO_PORT_INITLEVEL;
     params.level = 1.0f;
 
     bool audio_ready = false;
@@ -190,13 +195,18 @@ static void *audio_thread_worker(void *arg)
     float *audio_data = NULL;
     volatile u64 *read_index_ptr = NULL;
 
-    if (audioPortOpen(&params, &s_audio_port_num) == 0) {
-        if (audioGetPortConfig(s_audio_port_num, &config) == 0) {
+    s32 open_ret = audioPortOpen(&params, &s_audio_port_num);
+    log_write("[AUDIO_THREAD] audioPortOpen returned: 0x%08X (port: %u)\n", open_ret, s_audio_port_num);
+    if (open_ret == 0) {
+        s32 cfg_ret = audioGetPortConfig(s_audio_port_num, &config);
+        log_write("[AUDIO_THREAD] audioGetPortConfig returned: 0x%08X (readIdx: 0x%08X, dataStart: 0x%08X)\n",
+                  cfg_ret, config.readIndex, config.audioDataStart);
+        if (cfg_ret == 0) {
             read_index_ptr = (volatile u64 *)(uintptr_t)config.readIndex;
             audio_data = (float *)(uintptr_t)config.audioDataStart;
-            audioPortStart(s_audio_port_num);
-            audio_ready = true;
-            printf("[AUDIO] PS3 audio port opened and started\n");
+            s32 start_ret = audioPortStart(s_audio_port_num);
+            log_write("[AUDIO_THREAD] audioPortStart returned: 0x%08X\n", start_ret);
+            audio_ready = (start_ret == 0);
         }
     }
 #endif
@@ -303,14 +313,19 @@ int audio_engine_init(const cd_toc_t *toc) {
     memset(s_vis_buffer, 0, sizeof(s_vis_buffer));
 
 #ifdef HAVE_PSL1GHT_AUDIO
-    audioInit();
+    log_write("[AUDIO] Calling audioInit()...\n");
+    s32 a_init = audioInit();
+    log_write("[AUDIO] audioInit returned: 0x%08X\n", a_init);
 #endif
 
     s_engine_running = true;
 
 #if defined(__PS3__) || defined(__PPU__)
-    if (sysThreadCreate(&s_thread_handle, audio_thread_worker, NULL, 1000, 64 * 1024, THREAD_JOINABLE, "AudioPPU") != 0) {
-        printf("[AUDIO] Failed to create audio thread\n");
+    log_write("[AUDIO] Calling sysThreadCreate(AudioPPU)...\n");
+    s32 t_res = sysThreadCreate(&s_thread_handle, audio_thread_worker, NULL, 1000, 64 * 1024, THREAD_JOINABLE, "AudioPPU");
+    log_write("[AUDIO] sysThreadCreate returned: 0x%08X\n", t_res);
+    if (t_res != 0) {
+        log_write("[AUDIO] Failed to create audio thread!\n");
         s_engine_running = false;
         return -1;
     }
@@ -322,7 +337,7 @@ int audio_engine_init(const cd_toc_t *toc) {
     }
 #endif
 
-    printf("[AUDIO] Audio engine initialized\n");
+    log_write("[AUDIO] Audio engine initialized successfully\n");
     return 0;
 }
 

@@ -14,6 +14,7 @@ ICON0       := $(CURDIR)/pkg/ICON0.PNG
 TARGET      := CDPL00001
 
 SRCS        := src/main.c \
+               src/logger.c \
                src/cd_drive.c \
                src/discid.c \
                src/metadata.c \
@@ -83,8 +84,8 @@ host: $(SRCS)
 	$(CC) $(HOST_CFLAGS) $(SRCS) $(HOST_LDFLAGS) -o ps3-cd-player-host
 	@echo "Built ps3-cd-player-host successfully."
 
-test: tests/test_suite.c src/cd_drive.c src/discid.c src/metadata.c src/visualizer.c src/cJSON.c
-	$(CC) $(HOST_CFLAGS) tests/test_suite.c src/cd_drive.c src/discid.c src/metadata.c src/visualizer.c src/cJSON.c $(HOST_LDFLAGS) -o run_tests
+test: tests/test_suite.c src/logger.c src/cd_drive.c src/discid.c src/metadata.c src/visualizer.c src/cJSON.c
+	$(CC) $(HOST_CFLAGS) tests/test_suite.c src/logger.c src/cd_drive.c src/discid.c src/metadata.c src/visualizer.c src/cJSON.c $(HOST_LDFLAGS) -o run_tests
 	@./run_tests
 
 clean:
