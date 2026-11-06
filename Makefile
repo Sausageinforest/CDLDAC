@@ -35,12 +35,7 @@ include $(PSL1GHT)/ppu_rules
 
 CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDES) -I$(PS3DEV)/portlibs/ppu/include $(LIBPSL1GHT_INC)
 LDFLAGS     := $(MACHDEP) -L$(PS3DEV)/portlibs/ppu/lib -L$(PSL1GHT)/lib
-LIBS        := -laudio -lio -lnet -lsysutil -lsysmodule -llv2 -lm
-
-# Detect Tiny3D if available
-ifneq ($(wildcard $(PS3DEV)/portlibs/ppu/lib/libtiny3d.a $(PSL1GHT)/lib/libtiny3d.a),)
-LIBS        += -ltiny3d
-endif
+LIBS        := -ltiny3d -lgcm_sys -lsysutil -lsysmodule -laudio -lio -lnet -llv2 -lm
 
 .PHONY: all pkg clean test host
 
@@ -53,7 +48,7 @@ src/%.o: src/%.c
 
 $(TARGET).elf: $(OBJS)
 	@echo "LD $@"
-	@$(CC) $(LDFLAGS) $(OBJS) $(LIBPSL1GHT_LIB) $(LIBS) -o $@
+	@$(CC) $(LDFLAGS) $(OBJS) $(LIBPSL1GHT_LIB) -Wl,--start-group $(LIBS) -Wl,--end-group -o $@
 
 else
 # ------------------------------------------------------------------------------

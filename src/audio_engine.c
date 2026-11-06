@@ -2,11 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
-#include <unistd.h>
 #include <math.h>
 
 #if defined(__PS3__) || defined(__PPU__)
+#include <sys/thread.h>
+#include <sys/mutex.h>
+#include <sys/systime.h>
+#include <lv2/thread.h>
+
 #if defined(__has_include)
 #if __has_include(<audio/audio.h>)
 #include <audio/audio.h>
@@ -14,25 +17,60 @@
 #endif
 #endif
 
+typedef sys_mutex_t ps_mutex_t;
+
+static inline void ps_mutex_init(ps_mutex_t *m) {
+    sys_mutex_attr_t attr;
+    sysMutexAttrInitialize(attr);
+    sysMutexCreate(m, &attr);
+}
+static inline void ps_mutex_lock(ps_mutex_t *m) {
+    sysMutexLock(*m, 0);
+}
+static inline void ps_mutex_unlock(ps_mutex_t *m) {
+    sysMutexUnlock(*m);
+}
+static inline void ps_mutex_destroy(ps_mutex_t *m) {
+    sysMutexDestroy(*m);
+}
+#define ps_sleep_ms(ms) sysUsleep((ms) * 1000)
+
+typedef sys_ppu_thread_t ps_thread_t;
+
+#else
+
+#include <pthread.h>
+#include <unistd.h>
+
+typedef pthread_mutex_t ps_mutex_t;
+#define ps_mutex_init(m) pthread_mutex_init(m, NULL)
+#define ps_mutex_lock(m) pthread_mutex_lock(m)
+#define ps_mutex_unlock(m) pthread_mutex_unlock(m)
+#define ps_mutex_destroy(m) pthread_mutex_destroy(m)
+#define ps_sleep_ms(ms) usleep((ms) * 1000)
+
+typedef pthread_t ps_thread_t;
+
+#endif
+
 #ifdef HAVE_PSL1GHT_AUDIO
 static u32 s_audio_port_num = 0;
-#endif
 #endif
 
 #define RING_BUFFER_SIZE (1024 * 1024)   /* 1 MB ring buffer (~5.9 seconds of audio) */
 #define VIS_BUFFER_SIZE 2048
-#define AUDIO_FRAMES_PER_BLOCK 512       /* 512 stereo frames = 2048 bytes */
+#define AUDIO_FRAMES_PER_BLOCK 256       /* 256 stereo frames = 1024 bytes PCM */
 #define AUDIO_BYTES_PER_BLOCK (AUDIO_FRAMES_PER_BLOCK * 4)
 
 static uint8_t s_ring_buffer[RING_BUFFER_SIZE];
 static size_t s_rb_read = 0;
 static size_t s_rb_write = 0;
 static size_t s_rb_used = 0;
-static pthread_mutex_t s_rb_mutex = PTHREAD_MUTEX_INITIALIZER;
+static ps_mutex_t s_rb_mutex;
 
 static float s_vis_buffer[VIS_BUFFER_SIZE];
 static size_t s_vis_write_idx = 0;
-static pthread_mutex_t s_vis_mutex = PTHREAD_MUTEX_INITIALIZER;
+static ps_mutex_t s_vis_mutex;
 
 static cd_toc_t s_current_toc;
 static audio_status_info_t s_status = {
@@ -45,89 +83,121 @@ static audio_status_info_t s_status = {
     .track_total_ms = 0,
     .volume = 1.0f
 };
-static pthread_mutex_t s_status_mutex = PTHREAD_MUTEX_INITIALIZER;
+static ps_mutex_t s_status_mutex;
+static volatile bool s_mutexes_inited = false;
 
 static volatile bool s_engine_running = false;
-static pthread_t s_thread_handle;
+static ps_thread_t s_thread_handle;
+
+static void ensure_mutexes(void) {
+    if (!s_mutexes_inited) {
+        ps_mutex_init(&s_rb_mutex);
+        ps_mutex_init(&s_vis_mutex);
+        ps_mutex_init(&s_status_mutex);
+        s_mutexes_inited = true;
+    }
+}
 
 /* Ring buffer functions (thread safe) */
 static void rb_clear(void) {
-    pthread_mutex_lock(&s_rb_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_rb_mutex);
     s_rb_read = 0;
     s_rb_write = 0;
     s_rb_used = 0;
-    pthread_mutex_unlock(&s_rb_mutex);
+    ps_mutex_unlock(&s_rb_mutex);
 }
 
 static size_t rb_free_space(void) {
-    pthread_mutex_lock(&s_rb_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_rb_mutex);
     size_t free_sp = RING_BUFFER_SIZE - s_rb_used;
-    pthread_mutex_unlock(&s_rb_mutex);
+    ps_mutex_unlock(&s_rb_mutex);
     return free_sp;
 }
 
 static size_t rb_push(const uint8_t *data, size_t len) {
-    pthread_mutex_lock(&s_rb_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_rb_mutex);
     size_t to_write = (len > (RING_BUFFER_SIZE - s_rb_used)) ? (RING_BUFFER_SIZE - s_rb_used) : len;
     for (size_t i = 0; i < to_write; i++) {
         s_ring_buffer[s_rb_write] = data[i];
         s_rb_write = (s_rb_write + 1) % RING_BUFFER_SIZE;
     }
     s_rb_used += to_write;
-    pthread_mutex_unlock(&s_rb_mutex);
+    ps_mutex_unlock(&s_rb_mutex);
     return to_write;
 }
 
 static size_t rb_pop(uint8_t *dest, size_t len) {
-    pthread_mutex_lock(&s_rb_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_rb_mutex);
     size_t to_read = (len > s_rb_used) ? s_rb_used : len;
     for (size_t i = 0; i < to_read; i++) {
         dest[i] = s_ring_buffer[s_rb_read];
         s_rb_read = (s_rb_read + 1) % RING_BUFFER_SIZE;
     }
     s_rb_used -= to_read;
-    pthread_mutex_unlock(&s_rb_mutex);
+    ps_mutex_unlock(&s_rb_mutex);
     return to_read;
 }
 
 /* Visualization buffer feeder */
 static void vis_feed(const int16_t *stereo_samples, int num_frames) {
-    pthread_mutex_lock(&s_vis_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_vis_mutex);
     for (int i = 0; i < num_frames; i++) {
         float mono = ((float)stereo_samples[i * 2] + (float)stereo_samples[i * 2 + 1]) / 65536.0f;
         s_vis_buffer[s_vis_write_idx] = mono;
         s_vis_write_idx = (s_vis_write_idx + 1) % VIS_BUFFER_SIZE;
     }
-    pthread_mutex_unlock(&s_vis_mutex);
+    ps_mutex_unlock(&s_vis_mutex);
 }
 
 int audio_get_vis_samples(float *out_samples, int num_samples) {
     if (!out_samples || num_samples <= 0) return -1;
-    pthread_mutex_lock(&s_vis_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_vis_mutex);
     size_t read_start = (s_vis_write_idx + VIS_BUFFER_SIZE - num_samples) % VIS_BUFFER_SIZE;
     for (int i = 0; i < num_samples; i++) {
         out_samples[i] = s_vis_buffer[(read_start + i) % VIS_BUFFER_SIZE];
     }
-    pthread_mutex_unlock(&s_vis_mutex);
+    ps_mutex_unlock(&s_vis_mutex);
     return 0;
 }
 
 /* Audio streaming background thread */
-static void *audio_thread_worker(void *arg) {
+#if defined(__PS3__) || defined(__PPU__)
+static void audio_thread_worker(void *arg)
+#else
+static void *audio_thread_worker(void *arg)
+#endif
+{
     (void)arg;
     uint8_t read_chunk[CD_SECTOR_SIZE_RAW * 4]; /* Read 4 sectors at once = 9408 bytes */
     uint8_t play_chunk[AUDIO_BYTES_PER_BLOCK];
 
 #ifdef HAVE_PSL1GHT_AUDIO
     audioPortParam params;
+    audioPortConfig config;
     params.numChannels = AUDIO_PORT_2CH;
-    params.numBlocks = 8;
+    params.numBlocks = AUDIO_BLOCK_8;
     params.attrib = 0;
     params.level = 1.0f;
 
+    bool audio_ready = false;
+    u32 audio_block_idx = 0;
+    float *audio_data = NULL;
+    volatile u64 *read_index_ptr = NULL;
+
     if (audioPortOpen(&params, &s_audio_port_num) == 0) {
-        audioPortStart(s_audio_port_num);
-        printf("[AUDIO] PS3 audio port opened and started\n");
+        if (audioGetPortConfig(s_audio_port_num, &config) == 0) {
+            read_index_ptr = (volatile u64 *)(uintptr_t)config.readIndex;
+            audio_data = (float *)(uintptr_t)config.audioDataStart;
+            audioPortStart(s_audio_port_num);
+            audio_ready = true;
+            printf("[AUDIO] PS3 audio port opened and started\n");
+        }
     }
 #endif
 
@@ -137,14 +207,15 @@ static void *audio_thread_worker(void *arg) {
         uint32_t cur_lba, end_lba, start_lba;
         float vol;
 
-        pthread_mutex_lock(&s_status_mutex);
+        ensure_mutexes();
+        ps_mutex_lock(&s_status_mutex);
         cur_state = s_status.state;
         track_num = s_status.current_track;
         cur_lba = s_status.current_lba;
         start_lba = s_status.track_start_lba;
         end_lba = s_status.track_end_lba;
         vol = s_status.volume;
-        pthread_mutex_unlock(&s_status_mutex);
+        ps_mutex_unlock(&s_status_mutex);
 
         if (cur_state == AUDIO_STATE_PLAYING) {
             /* 1. Drive reading: if ring buffer has space, fill it */
@@ -158,12 +229,12 @@ static void *audio_thread_worker(void *arg) {
                     rb_push(read_chunk, sectors_to_read * CD_SECTOR_SIZE_RAW);
                     cur_lba += sectors_to_read;
 
-                    pthread_mutex_lock(&s_status_mutex);
+                    ps_mutex_lock(&s_status_mutex);
                     s_status.current_lba = cur_lba;
                     if (cur_lba >= start_lba) {
                         s_status.track_elapsed_ms = ((cur_lba - start_lba) * 1000) / CD_FRAMES_PER_SEC;
                     }
-                    pthread_mutex_unlock(&s_status_mutex);
+                    ps_mutex_unlock(&s_status_mutex);
                 }
             } else if (cur_lba >= end_lba) {
                 /* End of track reached: advance to next track if available */
@@ -176,47 +247,55 @@ static void *audio_thread_worker(void *arg) {
 
             /* 2. Audio drain and playback */
             size_t bytes_popped = rb_pop(play_chunk, sizeof(play_chunk));
-            if (bytes_popped > 0) {
+            if (bytes_popped >= sizeof(play_chunk)) {
                 int16_t *samples = (int16_t *)play_chunk;
-                int frames = bytes_popped / 4;
-
-                /* Apply volume */
-                if (vol < 0.99f) {
-                    for (int i = 0; i < frames * 2; i++) {
-                        int32_t val = (int32_t)((float)samples[i] * vol);
-                        if (val > 32767) val = 32767;
-                        if (val < -32768) val = -32768;
-                        samples[i] = (int16_t)val;
-                    }
-                }
 
                 /* Export to visualizer */
-                vis_feed(samples, frames);
+                vis_feed(samples, AUDIO_FRAMES_PER_BLOCK);
 
 #ifdef HAVE_PSL1GHT_AUDIO
-                /* Write to hardware port */
-                audioPortWrite(s_audio_port_num, play_chunk);
+                if (audio_ready && audio_data) {
+                    if (read_index_ptr) {
+                        while (*read_index_ptr == audio_block_idx && s_engine_running) {
+                            ps_sleep_ms(1);
+                        }
+                    }
+                    float *target_buf = audio_data + (2 * AUDIO_BLOCK_SAMPLES * audio_block_idx);
+                    for (int i = 0; i < AUDIO_BLOCK_SAMPLES * 2; i++) {
+                        target_buf[i] = ((float)samples[i] / 32768.0f) * vol;
+                    }
+                    audio_block_idx = (audio_block_idx + 1) % AUDIO_BLOCK_8;
+                }
 #else
-                /* Simulated playback pace: 512 frames @ 44100Hz = ~11.6ms */
-                usleep(11000);
+                (void)vol;
+                /* Simulated playback pace: 256 frames @ 44100Hz = ~5.8ms */
+                ps_sleep_ms(5);
 #endif
             } else {
-                usleep(2000); /* Buffer underrun wait */
+                ps_sleep_ms(2); /* Buffer underrun wait */
             }
         } else {
             /* Paused or Stopped */
-            usleep(20000);
+            ps_sleep_ms(20);
         }
     }
 
 #ifdef HAVE_PSL1GHT_AUDIO
-    audioPortStop(s_audio_port_num);
-    audioPortClose(s_audio_port_num);
+    if (audio_ready) {
+        audioPortStop(s_audio_port_num);
+        audioPortClose(s_audio_port_num);
+    }
 #endif
+
+#if defined(__PS3__) || defined(__PPU__)
+    sysThreadExit(0);
+#else
     return NULL;
+#endif
 }
 
 int audio_engine_init(const cd_toc_t *toc) {
+    ensure_mutexes();
     if (toc) {
         memcpy(&s_current_toc, toc, sizeof(cd_toc_t));
     }
@@ -228,11 +307,20 @@ int audio_engine_init(const cd_toc_t *toc) {
 #endif
 
     s_engine_running = true;
+
+#if defined(__PS3__) || defined(__PPU__)
+    if (sysThreadCreate(&s_thread_handle, audio_thread_worker, NULL, 100, 64 * 1024, THREAD_JOINABLE, "AudioPPU") != 0) {
+        printf("[AUDIO] Failed to create audio thread\n");
+        s_engine_running = false;
+        return -1;
+    }
+#else
     if (pthread_create(&s_thread_handle, NULL, audio_thread_worker, NULL) != 0) {
         printf("[AUDIO] Failed to create audio thread\n");
         s_engine_running = false;
         return -1;
     }
+#endif
 
     printf("[AUDIO] Audio engine initialized\n");
     return 0;
@@ -241,7 +329,13 @@ int audio_engine_init(const cd_toc_t *toc) {
 void audio_engine_shutdown(void) {
     if (!s_engine_running) return;
     s_engine_running = false;
+
+#if defined(__PS3__) || defined(__PPU__)
+    u64 ret_val = 0;
+    sysThreadJoin(s_thread_handle, &ret_val);
+#else
     pthread_join(s_thread_handle, NULL);
+#endif
 
 #ifdef HAVE_PSL1GHT_AUDIO
     audioQuit();
@@ -251,19 +345,21 @@ void audio_engine_shutdown(void) {
 
 void audio_engine_set_toc(const cd_toc_t *toc) {
     if (!toc) return;
-    pthread_mutex_lock(&s_status_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_status_mutex);
     memcpy(&s_current_toc, toc, sizeof(cd_toc_t));
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
 }
 
 int audio_play_track(int track_number) {
+    ensure_mutexes();
     if (track_number < s_current_toc.first_track || track_number > s_current_toc.last_track) {
         return -1;
     }
 
     rb_clear();
 
-    pthread_mutex_lock(&s_status_mutex);
+    ps_mutex_lock(&s_status_mutex);
     s_status.current_track = track_number;
     s_status.track_start_lba = s_current_toc.tracks[track_number].start_lba;
     s_status.current_lba = s_status.track_start_lba;
@@ -274,48 +370,53 @@ int audio_play_track(int track_number) {
     s_status.track_elapsed_ms = 0;
     s_status.track_total_ms = s_current_toc.tracks[track_number].duration_ms;
     s_status.state = AUDIO_STATE_PLAYING;
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
 
     printf("[AUDIO] Playing track %d (LBA: %u to %u)\n", track_number, s_status.track_start_lba, s_status.track_end_lba);
     return 0;
 }
 
 void audio_pause(void) {
-    pthread_mutex_lock(&s_status_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_status_mutex);
     if (s_status.state == AUDIO_STATE_PLAYING) {
         s_status.state = AUDIO_STATE_PAUSED;
     }
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
 }
 
 void audio_resume(void) {
-    pthread_mutex_lock(&s_status_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_status_mutex);
     if (s_status.state == AUDIO_STATE_PAUSED) {
         s_status.state = AUDIO_STATE_PLAYING;
     }
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
 }
 
 void audio_toggle_pause(void) {
-    pthread_mutex_lock(&s_status_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_status_mutex);
     if (s_status.state == AUDIO_STATE_PLAYING) {
         s_status.state = AUDIO_STATE_PAUSED;
     } else if (s_status.state == AUDIO_STATE_PAUSED) {
         s_status.state = AUDIO_STATE_PLAYING;
     }
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
 }
 
 void audio_stop(void) {
-    pthread_mutex_lock(&s_status_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_status_mutex);
     s_status.state = AUDIO_STATE_STOPPED;
     s_status.track_elapsed_ms = 0;
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
     rb_clear();
 }
 
 void audio_seek(int delta_seconds) {
-    pthread_mutex_lock(&s_status_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_status_mutex);
     int32_t delta_lba = delta_seconds * CD_FRAMES_PER_SEC;
     int32_t target_lba = (int32_t)s_status.current_lba + delta_lba;
 
@@ -328,7 +429,7 @@ void audio_seek(int delta_seconds) {
 
     s_status.current_lba = (uint32_t)target_lba;
     s_status.track_elapsed_ms = ((s_status.current_lba - s_status.track_start_lba) * 1000) / CD_FRAMES_PER_SEC;
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
 
     rb_clear();
 }
@@ -336,21 +437,24 @@ void audio_seek(int delta_seconds) {
 void audio_set_volume(float volume) {
     if (volume < 0.0f) volume = 0.0f;
     if (volume > 1.0f) volume = 1.0f;
-    pthread_mutex_lock(&s_status_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_status_mutex);
     s_status.volume = volume;
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
 }
 
 float audio_get_volume(void) {
-    pthread_mutex_lock(&s_status_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_status_mutex);
     float v = s_status.volume;
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
     return v;
 }
 
 void audio_get_status(audio_status_info_t *out_status) {
     if (!out_status) return;
-    pthread_mutex_lock(&s_status_mutex);
+    ensure_mutexes();
+    ps_mutex_lock(&s_status_mutex);
     memcpy(out_status, &s_status, sizeof(audio_status_info_t));
-    pthread_mutex_unlock(&s_status_mutex);
+    ps_mutex_unlock(&s_status_mutex);
 }

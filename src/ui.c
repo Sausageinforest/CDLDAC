@@ -57,10 +57,8 @@ int ui_init(void) {
     s_ui_state.is_720p = false;
 
 #if defined(__PS3__) || defined(__PPU__)
-    if (tiny3d_Init) {
-        tiny3d_Init(1024 * 1024);
-        s_ps3_gfx_ready = 1;
-    }
+    tiny3d_Init(1024 * 1024);
+    s_ps3_gfx_ready = 1;
 #endif
 
     /* Load default cover image */
@@ -198,7 +196,7 @@ void ui_render(const album_metadata_t *meta,
     }
 
 #if defined(__PS3__) || defined(__PPU__)
-    if (!s_ps3_gfx_ready || !tiny3d_Clear) return;
+    if (!s_ps3_gfx_ready) return;
 
     tiny3d_Clear(0xFF0D1117, TINY3D_CLEAR_ALL); /* Audiophile deep dark slate */
 
@@ -304,7 +302,7 @@ void ui_render(const album_metadata_t *meta,
         }
     }
 
-    if (tiny3d_Flip) tiny3d_Flip();
+    tiny3d_Flip();
 #else
     /* Non-PS3 terminal / console simulation output */
     static int s_frame_counter = 0;
