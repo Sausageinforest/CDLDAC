@@ -36,7 +36,7 @@ include $(PSL1GHT)/ppu_rules
 
 CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) -D__PS3__ -D__PPU__ $(INCLUDES) -I$(PS3DEV)/portlibs/ppu/include $(LIBPSL1GHT_INC)
 LDFLAGS     := $(MACHDEP) -L$(PS3DEV)/portlibs/ppu/lib -L$(PSL1GHT)/lib
-LIBS        := -ltiny3d -lgcm_sys -lsysutil -lsysmodule -laudio -lio -lnet -llv2 -lm
+LIBS        := -ltiny3d -lgcm_sys -lsysutil -lsysmodule -lsysfs -laudio -lio -lnet -llv2 -lm
 
 .PHONY: all pkg clean test host
 
