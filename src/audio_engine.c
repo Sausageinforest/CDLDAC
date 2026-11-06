@@ -195,7 +195,7 @@ static void *audio_thread_worker(void *arg) {
 
 #ifdef HAVE_PSL1GHT_AUDIO
                 /* Write to hardware port */
-                cellAudioPortWrite(s_audio_port_num, play_chunk);
+                audioPortWrite(s_audio_port_num, play_chunk);
 #else
                 /* Simulated playback pace: 512 frames @ 44100Hz = ~11.6ms */
                 usleep(11000);
