@@ -50,7 +50,7 @@ int metadata_init(void) {
 
 void metadata_shutdown(void) {
 #if defined(__PS3__) || defined(__PPU__)
-    netFinalize();
+    netDeinitialize();
 #endif
 }
 

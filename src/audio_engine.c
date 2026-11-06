@@ -7,12 +7,16 @@
 #include <math.h>
 
 #if defined(__PS3__) || defined(__PPU__)
-#include <sys/ppu_thread.h>
-#include <sys/timer.h>
+#if defined(__has_include)
+#if __has_include(<audio/audio.h>)
 #include <audio/audio.h>
+#define HAVE_PSL1GHT_AUDIO 1
+#endif
+#endif
 
-static sys_ppu_thread_t s_audio_thread_id;
+#ifdef HAVE_PSL1GHT_AUDIO
 static u32 s_audio_port_num = 0;
+#endif
 #endif
 
 #define RING_BUFFER_SIZE (1024 * 1024)   /* 1 MB ring buffer (~5.9 seconds of audio) */
@@ -114,7 +118,7 @@ static void *audio_thread_worker(void *arg) {
     uint8_t read_chunk[CD_SECTOR_SIZE_RAW * 4]; /* Read 4 sectors at once = 9408 bytes */
     uint8_t play_chunk[AUDIO_BYTES_PER_BLOCK];
 
-#if defined(__PS3__) || defined(__PPU__)
+#ifdef HAVE_PSL1GHT_AUDIO
     audioPortParam params;
     params.numChannels = AUDIO_PORT_2CH;
     params.numBlocks = 8;
@@ -189,7 +193,7 @@ static void *audio_thread_worker(void *arg) {
                 /* Export to visualizer */
                 vis_feed(samples, frames);
 
-#if defined(__PS3__) || defined(__PPU__)
+#ifdef HAVE_PSL1GHT_AUDIO
                 /* Write to hardware port */
                 cellAudioPortWrite(s_audio_port_num, play_chunk);
 #else
@@ -205,7 +209,7 @@ static void *audio_thread_worker(void *arg) {
         }
     }
 
-#if defined(__PS3__) || defined(__PPU__)
+#ifdef HAVE_PSL1GHT_AUDIO
     audioPortStop(s_audio_port_num);
     audioPortClose(s_audio_port_num);
 #endif
@@ -219,7 +223,7 @@ int audio_engine_init(const cd_toc_t *toc) {
     rb_clear();
     memset(s_vis_buffer, 0, sizeof(s_vis_buffer));
 
-#if defined(__PS3__) || defined(__PPU__)
+#ifdef HAVE_PSL1GHT_AUDIO
     audioInit();
 #endif
 
@@ -239,7 +243,7 @@ void audio_engine_shutdown(void) {
     s_engine_running = false;
     pthread_join(s_thread_handle, NULL);
 
-#if defined(__PS3__) || defined(__PPU__)
+#ifdef HAVE_PSL1GHT_AUDIO
     audioQuit();
 #endif
     printf("[AUDIO] Audio engine shutdown\n");

@@ -42,32 +42,41 @@ void input_poll(controller_input_t *out_input) {
         return;
     }
 
-    /* Convert pad buttons: bit 0..15 in paddata.button[2] and [3] */
-    uint32_t curr_btn_mask = ((uint32_t)paddata.button[2] << 8) | paddata.button[3];
+    uint32_t curr_btn_mask = 0;
+    if (paddata.BTN_CROSS)    curr_btn_mask |= (1 << 0);
+    if (paddata.BTN_CIRCLE)   curr_btn_mask |= (1 << 1);
+    if (paddata.BTN_SQUARE)   curr_btn_mask |= (1 << 2);
+    if (paddata.BTN_TRIANGLE) curr_btn_mask |= (1 << 3);
+    if (paddata.BTN_START)    curr_btn_mask |= (1 << 4);
+    if (paddata.BTN_SELECT)   curr_btn_mask |= (1 << 5);
+    if (paddata.BTN_UP)       curr_btn_mask |= (1 << 6);
+    if (paddata.BTN_DOWN)     curr_btn_mask |= (1 << 7);
+    if (paddata.BTN_LEFT)     curr_btn_mask |= (1 << 8);
+    if (paddata.BTN_RIGHT)    curr_btn_mask |= (1 << 9);
+    if (paddata.BTN_L1)       curr_btn_mask |= (1 << 10);
+    if (paddata.BTN_R1)       curr_btn_mask |= (1 << 11);
+    if (paddata.BTN_L2)       curr_btn_mask |= (1 << 12);
+    if (paddata.BTN_R2)       curr_btn_mask |= (1 << 13);
+
     uint32_t pressed_mask = curr_btn_mask & (~s_prev_btn_mask);
 
-    out_input->cross_pressed    = (pressed_mask & PAD_CROSS) != 0;
-    out_input->circle_pressed   = (pressed_mask & PAD_CIRCLE) != 0;
-    out_input->square_pressed   = (pressed_mask & PAD_SQUARE) != 0;
-    out_input->triangle_pressed = (pressed_mask & PAD_TRIANGLE) != 0;
-    out_input->start_pressed    = (pressed_mask & PAD_START) != 0;
-    out_input->select_pressed   = (pressed_mask & PAD_SELECT) != 0;
-    out_input->up_pressed       = (pressed_mask & PAD_UP) != 0;
-    out_input->down_pressed     = (pressed_mask & PAD_DOWN) != 0;
-    out_input->left_pressed     = (pressed_mask & PAD_LEFT) != 0;
-    out_input->right_pressed    = (pressed_mask & PAD_RIGHT) != 0;
-    out_input->l1_pressed       = (pressed_mask & PAD_L1) != 0;
-    out_input->r1_pressed       = (pressed_mask & PAD_R1) != 0;
+    out_input->cross_pressed    = (pressed_mask & (1 << 0)) != 0;
+    out_input->circle_pressed   = (pressed_mask & (1 << 1)) != 0;
+    out_input->square_pressed   = (pressed_mask & (1 << 2)) != 0;
+    out_input->triangle_pressed = (pressed_mask & (1 << 3)) != 0;
+    out_input->start_pressed    = (pressed_mask & (1 << 4)) != 0;
+    out_input->select_pressed   = (pressed_mask & (1 << 5)) != 0;
+    out_input->up_pressed       = (pressed_mask & (1 << 6)) != 0;
+    out_input->down_pressed     = (pressed_mask & (1 << 7)) != 0;
+    out_input->left_pressed     = (pressed_mask & (1 << 8)) != 0;
+    out_input->right_pressed    = (pressed_mask & (1 << 9)) != 0;
+    out_input->l1_pressed       = (pressed_mask & (1 << 10)) != 0;
+    out_input->r1_pressed       = (pressed_mask & (1 << 11)) != 0;
 
-    out_input->l2_held = (curr_btn_mask & PAD_L2) != 0;
-    out_input->r2_held = (curr_btn_mask & PAD_R2) != 0;
-    out_input->up_held = (curr_btn_mask & PAD_UP) != 0;
-    out_input->down_held = (curr_btn_mask & PAD_DOWN) != 0;
-
-    out_input->left_stick_x  = paddata.button[4] - 128;
-    out_input->left_stick_y  = paddata.button[5] - 128;
-    out_input->right_stick_x = paddata.button[6] - 128;
-    out_input->right_stick_y = paddata.button[7] - 128;
+    out_input->l2_held = (curr_btn_mask & (1 << 12)) != 0;
+    out_input->r2_held = (curr_btn_mask & (1 << 13)) != 0;
+    out_input->up_held = (curr_btn_mask & (1 << 6)) != 0;
+    out_input->down_held = (curr_btn_mask & (1 << 7)) != 0;
 
     s_prev_btn_mask = curr_btn_mask;
 #else
