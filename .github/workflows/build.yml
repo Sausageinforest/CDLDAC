@@ -1,0 +1,27 @@
+name: Build PS3 Package (PKG)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-pkg:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ps3dev/ps3dev:latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build PS3 Application and Package
+        run: |
+          make
+
+      - name: Upload PKG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CDPL00001.pkg
+          path: CDPL00001.pkg
