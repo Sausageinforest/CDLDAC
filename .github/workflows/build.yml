@@ -31,8 +31,12 @@ jobs:
 
       - name: Finalize Retail PKG for PS3HEN
         run: |
+          gcc -O2 tools/package_finalize.c -lcrypto -o tools/package_finalize || true
+          if [ -x tools/package_finalize ]; then
+            ./tools/package_finalize CDPL00001.pkg CDPL00001.gnpdrm.pkg CDPL00001-fself.pkg || true
+          fi
           pip install cryptography
-          python3 tools/package_finalize.py CDPL00001.pkg CDPL00001.gnpdrm.pkg
+          python3 tools/package_finalize.py CDPL00001.pkg CDPL00001.gnpdrm.pkg CDPL00001-fself.pkg
           python3 -c "with open('CDPL00001.pkg', 'rb') as f: print('CDPL00001.pkg finalized byte 4:', hex(f.read(5)[4]))"
 
       - name: Upload Artifacts

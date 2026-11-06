@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import os
 import struct
 import hashlib
 
@@ -10,6 +11,10 @@ RETAIL_KEY = bytes([
 ])
 
 def finalize_pkg(pkg_path):
+    if not os.path.isfile(pkg_path):
+        print(f"Skipping {pkg_path} (file not found)")
+        return
+
     try:
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     except ImportError:
@@ -22,11 +27,28 @@ def finalize_pkg(pkg_path):
     
     nlen = len(data)
     if nlen < 0x140:
-        print(f"Error: {pkg_path} is too small to be a valid PKG")
-        sys.exit(1)
+        print(f"Error: {pkg_path} is too small to be a valid PKG ({nlen} bytes)")
+        return
 
-    data_offset = struct.unpack(">Q", data[24:32])[0]
-    data_size = struct.unpack(">Q", data[32:40])[0]
+    if data[4] == 0x80:
+        print(f"  {pkg_path} is already retail finalized (byte 4 == 0x80). Skipping.")
+        return
+
+    # In PS3 PKG header:
+    # 0..4: magic (\x7F\x50\x4B\x47)
+    # 4..8: type/debugFlag
+    # 24..32: packageSize (u64)
+    # 32..40: dataOffset (u64)
+    # 40..48: dataSize (u64)
+    data_offset = struct.unpack(">Q", data[32:40])[0]
+    data_size = struct.unpack(">Q", data[40:48])[0]
+    print(f"  PKG size: {nlen}, data_offset: {data_offset}, data_size: {data_size}")
+
+    if data_offset >= nlen:
+        print(f"Error: data_offset ({data_offset}) exceeds file size ({nlen})")
+        return
+
+    end_ptr = min(data_offset + data_size, nlen)
 
     # 1. Decrypt Debug PKG payload using SHA1-based keystream
     sha_crap = bytearray(0x40)
@@ -37,9 +59,9 @@ def finalize_pkg(pkg_path):
     
     dptr = data_offset
     counter = 0
-    while dptr < (data_offset + data_size):
+    while dptr < end_ptr:
         h = hashlib.sha1(sha_crap).digest()
-        chunk_len = min(16, (data_offset + data_size) - dptr)
+        chunk_len = min(16, end_ptr - dptr)
         for i in range(chunk_len):
             data[dptr + i] ^= h[i]
         counter += 1
@@ -50,17 +72,21 @@ def finalize_pkg(pkg_path):
     pkg_iv = bytes(data[0x70:0x80])
     cipher = Cipher(algorithms.AES(RETAIL_KEY), modes.CTR(pkg_iv))
     encryptor = cipher.encryptor()
-    data[data_offset:data_offset+data_size] = (
-        encryptor.update(bytes(data[data_offset:data_offset+data_size])) + encryptor.finalize()
+    data[data_offset:end_ptr] = (
+        encryptor.update(bytes(data[data_offset:end_ptr])) + encryptor.finalize()
     )
 
     # 3. Finalize header flags (set retail finalized bit 0x80)
     data[4] = 0x80
-    data[data_offset+data_size:data_offset+data_size+0x60] = b"\x00" * 0x60
+    zero_start = data_offset + data_size
+    zero_end = min(zero_start + 0x60, nlen)
+    if zero_start < nlen:
+        data[zero_start:zero_end] = b"\x00" * (zero_end - zero_start)
 
     # 4. Update SHA1 hash at the end of the package
-    final_hash = hashlib.sha1(data[:nlen-0x20]).digest()
-    data[nlen-0x20:nlen] = final_hash + (b"\x00" * (0x20 - len(final_hash)))
+    if nlen >= 0x20:
+        final_hash = hashlib.sha1(data[:nlen-0x20]).digest()
+        data[nlen-0x20:nlen-0x20+len(final_hash)] = final_hash
 
     with open(pkg_path, "wb") as f:
         f.write(data)
@@ -68,7 +94,7 @@ def finalize_pkg(pkg_path):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: package_finalize.py <file.pkg>")
+        print("Usage: package_finalize.py <file.pkg> ...")
         sys.exit(1)
     for p in sys.argv[1:]:
         finalize_pkg(p)
