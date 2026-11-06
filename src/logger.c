@@ -21,9 +21,15 @@ void log_write(const char *fmt, ...) {
     static const char * const s_log_paths[] = {
         "/dev_usb000/cdplayer.log",
         "/dev_usb001/cdplayer.log",
+        "/dev_usb002/cdplayer.log",
+        "/dev_usb003/cdplayer.log",
+        "/dev_usb004/cdplayer.log",
+        "/dev_usb005/cdplayer.log",
         "/dev_usb006/cdplayer.log",
+        "/dev_usb007/cdplayer.log",
         "/dev_hdd0/tmp/cdplayer.log",
-        "/dev_hdd0/game/CDPL00001/debug.log"
+        "/dev_hdd0/game/CDPL00001/debug.log",
+        "/dev_hdd0/game/CDPL00001/USRDIR/debug.log"
     };
 
     for (size_t i = 0; i < sizeof(s_log_paths) / sizeof(s_log_paths[0]); i++) {

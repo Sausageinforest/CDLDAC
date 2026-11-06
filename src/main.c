@@ -17,6 +17,7 @@
 
 #if defined(__PS3__) || defined(__PPU__)
 #include <sys/process.h>
+SYS_PROCESS_PARAM(1001, 0x100000);
 #endif
 
 static cd_toc_t g_toc;

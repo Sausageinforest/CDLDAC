@@ -34,7 +34,7 @@ ifneq ($(wildcard $(PSL1GHT)/ppu_rules),)
 # ------------------------------------------------------------------------------
 include $(PSL1GHT)/ppu_rules
 
-CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDES) -I$(PS3DEV)/portlibs/ppu/include $(LIBPSL1GHT_INC)
+CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) -D__PS3__ -D__PPU__ $(INCLUDES) -I$(PS3DEV)/portlibs/ppu/include $(LIBPSL1GHT_INC)
 LDFLAGS     := $(MACHDEP) -L$(PS3DEV)/portlibs/ppu/lib -L$(PSL1GHT)/lib
 LIBS        := -ltiny3d -lgcm_sys -lsysutil -lsysmodule -laudio -lio -lnet -llv2 -lm
 
@@ -51,6 +51,13 @@ $(TARGET).elf: $(OBJS)
 	@echo "LD $@"
 	@$(CC) $(LDFLAGS) $(OBJS) $(LIBPSL1GHT_LIB) -Wl,--start-group $(LIBS) -Wl,--end-group -o $@
 
+$(TARGET).self: $(TARGET).elf
+	@echo "Creating SELF $@..."
+	@mkdir -p build
+	@ppu-strip $< -o build/$(TARGET).elf || strip $< -o build/$(TARGET).elf || cp -f $< build/$(TARGET).elf
+	@which sprxlinker >/dev/null 2>&1 && sprxlinker build/$(TARGET).elf || true
+	@make_self build/$(TARGET).elf $@ || true
+
 $(TARGET).pkg: $(TARGET).elf $(TARGET).self
 	@echo "Packaging $(TARGET).pkg..."
 	@rm -rf build/pkg
@@ -64,10 +71,15 @@ $(TARGET).pkg: $(TARGET).elf $(TARGET).self
 	fi
 	@cp -f assets/default_cover.png build/pkg/USRDIR/assets/
 	@cp -f assets/font.ttf build/pkg/USRDIR/assets/
-	@make_self_npdrm $(TARGET).elf build/pkg/USRDIR/EBOOT.BIN $(CONTENTID) || cp -f $(TARGET).self build/pkg/USRDIR/EBOOT.BIN
+	@mkdir -p build
+	@ppu-strip $(TARGET).elf -o build/$(TARGET).elf || strip $(TARGET).elf -o build/$(TARGET).elf || cp -f $(TARGET).elf build/$(TARGET).elf
+	@which sprxlinker >/dev/null 2>&1 && sprxlinker build/$(TARGET).elf || true
+	@make_self_npdrm build/$(TARGET).elf build/pkg/USRDIR/EBOOT.BIN $(CONTENTID) || cp -f $(TARGET).self build/pkg/USRDIR/EBOOT.BIN
 	@pkg --contentid $(CONTENTID) build/pkg/ $(TARGET).pkg
+	@which package_finalize >/dev/null 2>&1 && package_finalize $(TARGET).pkg || true
 	@cp -f $(TARGET).pkg $(TARGET).gnpdrm.pkg
-	@which package_finalize >/dev/null 2>&1 && package_finalize $(TARGET).gnpdrm.pkg || true
+	@cp -f $(TARGET).self build/pkg/USRDIR/EBOOT.BIN
+	@pkg --contentid $(CONTENTID) build/pkg/ $(TARGET)-fself.pkg || true
 
 else
 # ------------------------------------------------------------------------------
