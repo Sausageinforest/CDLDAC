@@ -50,6 +50,24 @@ $(TARGET).elf: $(OBJS)
 	@echo "LD $@"
 	@$(CC) $(LDFLAGS) $(OBJS) $(LIBPSL1GHT_LIB) -Wl,--start-group $(LIBS) -Wl,--end-group -o $@
 
+$(TARGET).pkg: $(TARGET).self
+	@echo "Packaging $(TARGET).pkg..."
+	@rm -rf build/pkg
+	@mkdir -p build/pkg/USRDIR/assets build/pkg/USRDIR/cache
+	@cp -f pkg/ICON0.PNG build/pkg/ICON0.PNG
+	@cp -f pkg/PIC1.PNG build/pkg/PIC1.PNG
+	@cp -f pkg/PARAM.SFO build/pkg/PARAM.SFO
+	@cp -f assets/default_cover.png build/pkg/USRDIR/assets/
+	@cp -f assets/font.ttf build/pkg/USRDIR/assets/
+	@cp -f $(TARGET).self build/pkg/USRDIR/EBOOT.BIN
+	@if [ -f pkg/package.conf ]; then \
+		pkg --contentid $(CONTENTID) build/pkg/ $(TARGET).pkg 2>/dev/null || pkg pkg/package.conf build/pkg/ $(TARGET).pkg ; \
+	else \
+		pkg --contentid $(CONTENTID) build/pkg/ $(TARGET).pkg ; \
+	fi
+	@which package_finalize >/dev/null 2>&1 && package_finalize $(TARGET).pkg || true
+	@cp -f $(TARGET).pkg $(TARGET).gnpdrm.pkg 2>/dev/null || true
+
 else
 # ------------------------------------------------------------------------------
 # Host Environment (Testing / Verification)
@@ -70,4 +88,4 @@ test: tests/test_suite.c src/cd_drive.c src/discid.c src/metadata.c src/visualiz
 	@./run_tests
 
 clean:
-	rm -rf *.o src/*.o build $(TARGET).elf $(TARGET).self $(TARGET).pkg ps3-cd-player-host run_tests cache
+	rm -rf *.o src/*.o build $(TARGET).elf $(TARGET).self $(TARGET).pkg $(TARGET).gnpdrm.pkg ps3-cd-player-host run_tests cache

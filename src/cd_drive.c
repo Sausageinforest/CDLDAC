@@ -5,6 +5,8 @@
 #include <math.h>
 
 #if defined(__PS3__) || defined(__PPU__)
+#include <ppu-lv2.h>
+
 #define SYS_STORAGE_OPEN                 600
 #define SYS_STORAGE_CLOSE                601
 #define SYS_STORAGE_SEND_DEVICE_COMMAND  616
@@ -22,33 +24,19 @@ struct lv2_atapi_cmnd_block {
     uint32_t unknown;
 } __attribute__((packed, aligned(16)));
 
-static inline uint64_t lv2syscall1(uint64_t nr, uint64_t a1) {
-    register uint64_t r11 __asm__("r11") = nr;
-    register uint64_t r3  __asm__("r3")  = a1;
-    __asm__ __volatile__("sc 2" : "+r"(r3) : "r"(r11) : "r0", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory");
-    return r3;
+static inline s32 sys_storage_open(u64 dev_id, u32 unk, u32 *handle, u32 flags) {
+    lv2syscall4(SYS_STORAGE_OPEN, dev_id, unk, (u64)(uintptr_t)handle, flags);
+    return_to_user_prog(s32);
 }
 
-static inline uint64_t lv2syscall4(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4) {
-    register uint64_t r11 __asm__("r11") = nr;
-    register uint64_t r3  __asm__("r3")  = a1;
-    register uint64_t r4  __asm__("r4")  = a2;
-    register uint64_t r5  __asm__("r5")  = a3;
-    register uint64_t r6  __asm__("r6")  = a4;
-    __asm__ __volatile__("sc 2" : "+r"(r3) : "r"(r11), "r"(r4), "r"(r5), "r"(r6) : "r0", "r7", "r8", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory");
-    return r3;
+static inline s32 sys_storage_close(u32 handle) {
+    lv2syscall1(SYS_STORAGE_CLOSE, (u64)handle);
+    return_to_user_prog(s32);
 }
 
-static inline uint64_t lv2syscall6(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6) {
-    register uint64_t r11 __asm__("r11") = nr;
-    register uint64_t r3  __asm__("r3")  = a1;
-    register uint64_t r4  __asm__("r4")  = a2;
-    register uint64_t r5  __asm__("r5")  = a3;
-    register uint64_t r6  __asm__("r6")  = a4;
-    register uint64_t r7  __asm__("r7")  = a5;
-    register uint64_t r8  __asm__("r8")  = a6;
-    __asm__ __volatile__("sc 2" : "+r"(r3) : "r"(r11), "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8) : "r0", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory");
-    return r3;
+static inline s32 sys_storage_send_device_command(u32 handle, u32 cmd, void *cmnd_buf, u64 cmnd_size, void *data_buf, u64 data_size) {
+    lv2syscall6(SYS_STORAGE_SEND_DEVICE_COMMAND, (u64)handle, (u64)cmd, (u64)(uintptr_t)cmnd_buf, cmnd_size, (u64)(uintptr_t)data_buf, data_size);
+    return_to_user_prog(s32);
 }
 
 static uint32_t s_device_handle = 0;
@@ -80,7 +68,7 @@ int cd_drive_init(void) {
 #if defined(__PS3__) || defined(__PPU__)
     if (s_device_handle != 0) return 0;
     uint32_t handle = 0;
-    int ret = (int)lv2syscall4(SYS_STORAGE_OPEN, BDVD_DEV_ID, 0, (uint64_t)(uintptr_t)&handle, 0);
+    int ret = (int)sys_storage_open(BDVD_DEV_ID, 0, &handle, 0);
     if (ret != 0) {
         printf("[CD_DRIVE] Failed to open BDVD device: 0x%08X\n", ret);
         s_device_handle = 0;
@@ -121,7 +109,7 @@ int cd_drive_init(void) {
 void cd_drive_shutdown(void) {
 #if defined(__PS3__) || defined(__PPU__)
     if (s_device_handle != 0) {
-        lv2syscall1(SYS_STORAGE_CLOSE, (uint64_t)s_device_handle);
+        sys_storage_close(s_device_handle);
         s_device_handle = 0;
     }
 #else
@@ -182,10 +170,7 @@ int cd_drive_read_toc(cd_toc_t *out_toc) {
     cmd.in_out     = 1; /* Read */
     cmd.unknown    = 0;
 
-    int ret = (int)lv2syscall6(SYS_STORAGE_SEND_DEVICE_COMMAND,
-                               (uint64_t)s_device_handle, 0x01,
-                               (uint64_t)(uintptr_t)&cmd, sizeof(cmd),
-                               (uint64_t)(uintptr_t)toc_buf, alloc_len);
+    int ret = (int)sys_storage_send_device_command(s_device_handle, 0x01, &cmd, sizeof(cmd), toc_buf, alloc_len);
     if (ret != 0) {
         printf("[CD_DRIVE] lv2syscall6 READ_TOC failed: 0x%08X\n", ret);
         s_drive_status = CD_STATUS_NO_DISC;
@@ -277,10 +262,7 @@ int cd_drive_read_audio_sectors(uint32_t lba, uint32_t sector_count, uint8_t *ou
     cmd.in_out     = 1; /* Read */
     cmd.unknown    = 0;
 
-    int ret = (int)lv2syscall6(SYS_STORAGE_SEND_DEVICE_COMMAND,
-                               (uint64_t)s_device_handle, 0x01,
-                               (uint64_t)(uintptr_t)&cmd, sizeof(cmd),
-                               (uint64_t)(uintptr_t)out_buffer, total_bytes);
+    int ret = (int)sys_storage_send_device_command(s_device_handle, 0x01, &cmd, sizeof(cmd), out_buffer, total_bytes);
     if (ret != 0) {
         printf("[CD_DRIVE] Audio sector read failed at LBA %u: 0x%08X\n", lba, ret);
         return -1;

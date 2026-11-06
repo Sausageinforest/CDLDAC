@@ -309,7 +309,7 @@ int audio_engine_init(const cd_toc_t *toc) {
     s_engine_running = true;
 
 #if defined(__PS3__) || defined(__PPU__)
-    if (sysThreadCreate(&s_thread_handle, audio_thread_worker, NULL, 100, 64 * 1024, THREAD_JOINABLE, "AudioPPU") != 0) {
+    if (sysThreadCreate(&s_thread_handle, audio_thread_worker, NULL, 1000, 64 * 1024, THREAD_JOINABLE, "AudioPPU") != 0) {
         printf("[AUDIO] Failed to create audio thread\n");
         s_engine_running = false;
         return -1;

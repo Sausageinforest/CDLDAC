@@ -47,10 +47,10 @@ static void format_time(uint32_t ms, char *buf, size_t buf_sz) {
 
 int ui_init(void) {
     memset(&s_ui_state, 0, sizeof(s_ui_state));
-    s_ui_state.screen_width = 1920;
-    s_ui_state.screen_height = 1080;
-    s_ui_state.scale_x = 1.0f;
-    s_ui_state.scale_y = 1.0f;
+    s_ui_state.screen_width = 848;
+    s_ui_state.screen_height = 512;
+    s_ui_state.scale_x = 848.0f / 1920.0f;
+    s_ui_state.scale_y = 512.0f / 1080.0f;
     s_ui_state.mode = UI_MODE_STANDARD;
     s_ui_state.selected_track_index = 1;
     s_ui_state.scroll_offset = 0;
@@ -58,6 +58,7 @@ int ui_init(void) {
 
 #if defined(__PS3__) || defined(__PPU__)
     tiny3d_Init(1024 * 1024);
+    tiny3d_Project2D();
     s_ps3_gfx_ready = 1;
 #endif
 
@@ -201,6 +202,7 @@ void ui_render(const album_metadata_t *meta,
     if (!s_ps3_gfx_ready) return;
 
     tiny3d_Clear(0xFF0D1117, TINY3D_CLEAR_ALL); /* Audiophile deep dark slate */
+    tiny3d_Project2D();
 
     float sx = s_ui_state.scale_x;
     float sy = s_ui_state.scale_y;
