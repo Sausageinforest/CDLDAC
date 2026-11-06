@@ -1,0 +1,12 @@
+*.o
+*.elf
+*.self
+*.fake.self
+*.pkg
+*.gnpdrm.pkg
+*.zip
+build/
+run_tests
+ps3-cd-player-host
+cache/
+CDPL00001/USRDIR/EBOOT.BIN
