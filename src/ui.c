@@ -8,8 +8,12 @@
 #include "stb_image.h"
 
 #if defined(__PS3__) || defined(__PPU__)
+#if defined(__has_include)
+#if __has_include(<tiny3d.h>)
+#define HAVE_TINY3D 1
 #include <tiny3d.h>
-#include <libfont.h>
+#endif
+#endif
 
 static int s_ps3_gfx_ready = 0;
 #endif
@@ -42,20 +46,10 @@ int ui_init(void) {
     s_ui_state.is_720p = false;
 
 #if defined(__PS3__) || defined(__PPU__)
+#if defined(HAVE_TINY3D)
     tiny3d_Init(1024 * 1024);
     s_ps3_gfx_ready = 1;
-
-    /* Detect video mode */
-    videoResolution res;
-    if (videoGetResolution(&res) == 0) {
-        if (res.width == 1280 && res.height == 720) {
-            s_ui_state.screen_width = 1280;
-            s_ui_state.screen_height = 720;
-            s_ui_state.scale_x = 1280.0f / 1920.0f;
-            s_ui_state.scale_y = 720.0f / 1080.0f;
-            s_ui_state.is_720p = true;
-        }
-    }
+#endif
 #endif
 
     /* Load default cover image */
@@ -151,7 +145,7 @@ int ui_update_cover_art(const uint8_t *img_bytes, int img_size) {
 }
 
 /* Drawing primitives for Tiny3D / RSX hardware acceleration */
-#if defined(__PS3__) || defined(__PPU__)
+#if (defined(__PS3__) || defined(__PPU__)) && defined(HAVE_TINY3D)
 
 static void draw_rect(float x, float y, float w, float h, uint32_t color) {
     tiny3d_Polygon(TINY3D_QUADS);
@@ -192,7 +186,7 @@ void ui_render(const album_metadata_t *meta,
         if (progress > 1.0f) progress = 1.0f;
     }
 
-#if defined(__PS3__) || defined(__PPU__)
+#if (defined(__PS3__) || defined(__PPU__)) && defined(HAVE_TINY3D)
     if (!s_ps3_gfx_ready) return;
 
     tiny3d_Clear(0xFF0D1117, TINY3D_CLEAR_ALL); /* Audiophile deep dark slate */

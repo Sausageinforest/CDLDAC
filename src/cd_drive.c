@@ -5,13 +5,53 @@
 #include <math.h>
 
 #if defined(__PS3__) || defined(__PPU__)
-#include <sys/storage.h>
-#include <sys/errno.h>
+#define SYS_STORAGE_OPEN                 600
+#define SYS_STORAGE_CLOSE                601
+#define SYS_STORAGE_SEND_DEVICE_COMMAND  616
+#define BDVD_DEV_ID                      0x0101000000000006ULL
+#define SCSI_CMD_READ_TOC                0x43
+#define SCSI_CMD_READ_CD                 0xBE
 
-#define PS3_STORAGE_DEV_BDVD 0x0101000000000001ULL
-#define PS3_SCSI_CMD_EXECUTE 0x22
+struct lv2_atapi_cmnd_block {
+    uint8_t  pkt[32];
+    uint32_t pktlen;
+    uint32_t blocks;
+    uint32_t block_size;
+    uint32_t proto;
+    uint32_t in_out;
+    uint32_t unknown;
+} __attribute__((packed, aligned(16)));
 
-static s32 s_drive_fd = -1;
+static inline uint64_t lv2syscall1(uint64_t nr, uint64_t a1) {
+    register uint64_t r11 __asm__("r11") = nr;
+    register uint64_t r3  __asm__("r3")  = a1;
+    __asm__ __volatile__("sc 2" : "+r"(r3) : "r"(r11) : "r0", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory");
+    return r3;
+}
+
+static inline uint64_t lv2syscall4(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4) {
+    register uint64_t r11 __asm__("r11") = nr;
+    register uint64_t r3  __asm__("r3")  = a1;
+    register uint64_t r4  __asm__("r4")  = a2;
+    register uint64_t r5  __asm__("r5")  = a3;
+    register uint64_t r6  __asm__("r6")  = a4;
+    __asm__ __volatile__("sc 2" : "+r"(r3) : "r"(r11), "r"(r4), "r"(r5), "r"(r6) : "r0", "r7", "r8", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory");
+    return r3;
+}
+
+static inline uint64_t lv2syscall6(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6) {
+    register uint64_t r11 __asm__("r11") = nr;
+    register uint64_t r3  __asm__("r3")  = a1;
+    register uint64_t r4  __asm__("r4")  = a2;
+    register uint64_t r5  __asm__("r5")  = a3;
+    register uint64_t r6  __asm__("r6")  = a4;
+    register uint64_t r7  __asm__("r7")  = a5;
+    register uint64_t r8  __asm__("r8")  = a6;
+    __asm__ __volatile__("sc 2" : "+r"(r3) : "r"(r11), "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8) : "r0", "r9", "r10", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory");
+    return r3;
+}
+
+static uint32_t s_device_handle = 0;
 #else
 static int s_drive_fd = -1;
 static cd_toc_t s_mock_toc;
@@ -38,14 +78,17 @@ void cd_lba_to_msf(uint32_t lba, uint8_t *m, uint8_t *s, uint8_t *f) {
 
 int cd_drive_init(void) {
 #if defined(__PS3__) || defined(__PPU__)
-    s32 ret = sys_storage_open(PS3_STORAGE_DEV_BDVD, &s_drive_fd);
+    if (s_device_handle != 0) return 0;
+    uint32_t handle = 0;
+    int ret = (int)lv2syscall4(SYS_STORAGE_OPEN, BDVD_DEV_ID, 0, (uint64_t)(uintptr_t)&handle, 0);
     if (ret != 0) {
         printf("[CD_DRIVE] Failed to open BDVD device: 0x%08X\n", ret);
-        s_drive_fd = -1;
+        s_device_handle = 0;
         s_drive_status = CD_STATUS_NO_DISC;
         return -1;
     }
-    printf("[CD_DRIVE] Successfully opened BDVD device (fd: %d)\n", s_drive_fd);
+    s_device_handle = handle;
+    printf("[CD_DRIVE] Successfully opened BDVD device (handle: 0x%08X)\n", s_device_handle);
     s_drive_status = CD_STATUS_READY;
     return 0;
 #else
@@ -77,9 +120,9 @@ int cd_drive_init(void) {
 
 void cd_drive_shutdown(void) {
 #if defined(__PS3__) || defined(__PPU__)
-    if (s_drive_fd >= 0) {
-        sys_storage_close(s_drive_fd);
-        s_drive_fd = -1;
+    if (s_device_handle != 0) {
+        lv2syscall1(SYS_STORAGE_CLOSE, (uint64_t)s_device_handle);
+        s_device_handle = 0;
     }
 #else
     s_drive_fd = -1;
@@ -90,7 +133,7 @@ void cd_drive_shutdown(void) {
 
 cd_drive_status_t cd_drive_poll_status(void) {
 #if defined(__PS3__) || defined(__PPU__)
-    if (s_drive_fd < 0) {
+    if (s_device_handle == 0) {
         if (cd_drive_init() == 0) {
             cd_toc_t test_toc;
             if (cd_drive_read_toc(&test_toc) == 0) {
@@ -113,25 +156,38 @@ int cd_drive_read_toc(cd_toc_t *out_toc) {
     memset(out_toc, 0, sizeof(cd_toc_t));
 
 #if defined(__PS3__) || defined(__PPU__)
-    if (s_drive_fd < 0) {
+    if (s_device_handle == 0) {
         if (cd_drive_init() != 0) return -1;
     }
 
-    /* Buffer for SCSI READ TOC (Format 0, normal TOC) */
-    uint8_t toc_buf[4 + 100 * 8] = {0};
-    uint8_t cdb[10] = {0};
-    cdb[0] = 0x43; /* SCSI READ TOC */
-    cdb[1] = 0x00; /* LBA format */
-    cdb[2] = 0x00; /* Format 0: Track descriptors */
-    cdb[6] = 0x00; /* Start at track 0 */
-    cdb[7] = (sizeof(toc_buf) >> 8) & 0xFF;
-    cdb[8] = sizeof(toc_buf) & 0xFF;
+    uint8_t toc_buf[4 + 100 * 8] __attribute__((aligned(16)));
+    memset(toc_buf, 0, sizeof(toc_buf));
 
-    s32 ret = sys_storage_send_device_command(s_drive_fd, PS3_SCSI_CMD_EXECUTE,
-                                              cdb, sizeof(cdb),
-                                              toc_buf, sizeof(toc_buf));
+    struct lv2_atapi_cmnd_block cmd __attribute__((aligned(16)));
+    memset(&cmd, 0, sizeof(cmd));
+
+    uint16_t alloc_len = sizeof(toc_buf);
+    cmd.pkt[0] = SCSI_CMD_READ_TOC;
+    cmd.pkt[1] = 0x00;
+    cmd.pkt[2] = 0x00;
+    cmd.pkt[6] = 0x01;
+    cmd.pkt[7] = (uint8_t)((alloc_len >> 8) & 0xFF);
+    cmd.pkt[8] = (uint8_t)(alloc_len & 0xFF);
+    cmd.pkt[9] = 0x00;
+
+    cmd.pktlen     = 12;
+    cmd.blocks     = 1;
+    cmd.block_size = alloc_len;
+    cmd.proto      = 3; /* PIO Data-In */
+    cmd.in_out     = 1; /* Read */
+    cmd.unknown    = 0;
+
+    int ret = (int)lv2syscall6(SYS_STORAGE_SEND_DEVICE_COMMAND,
+                               (uint64_t)s_device_handle, 0x01,
+                               (uint64_t)(uintptr_t)&cmd, sizeof(cmd),
+                               (uint64_t)(uintptr_t)toc_buf, alloc_len);
     if (ret != 0) {
-        printf("[CD_DRIVE] sys_storage_send_device_command (READ TOC) failed: 0x%08X\n", ret);
+        printf("[CD_DRIVE] lv2syscall6 READ_TOC failed: 0x%08X\n", ret);
         s_drive_status = CD_STATUS_NO_DISC;
         return -1;
     }
@@ -161,7 +217,6 @@ int cd_drive_read_toc(cd_toc_t *out_toc) {
         bool is_audio = ((ctrl_adr & 0x04) == 0);
 
         if (track_num == 0xAA) {
-            /* Lead-out sector */
             out_toc->leadout_lba = lba;
         } else if (track_num >= first_track && track_num <= last_track) {
             out_toc->tracks[track_num].track_num = track_num;
@@ -196,33 +251,39 @@ int cd_drive_read_audio_sectors(uint32_t lba, uint32_t sector_count, uint8_t *ou
     if (!out_buffer || sector_count == 0) return -1;
 
 #if defined(__PS3__) || defined(__PPU__)
-    if (s_drive_fd < 0) return -1;
+    if (s_device_handle == 0) return -1;
 
-    /* SCSI command 0xBE: READ CD */
-    uint8_t cdb[12] = {0};
-    cdb[0] = 0xBE;                  /* READ CD */
-    cdb[1] = 0x04;                  /* Expected Sector Type: CD-DA (audio) */
-    cdb[2] = (lba >> 24) & 0xFF;    /* Starting LBA */
-    cdb[3] = (lba >> 16) & 0xFF;
-    cdb[4] = (lba >> 8)  & 0xFF;
-    cdb[5] = lba & 0xFF;
-    cdb[6] = (sector_count >> 16) & 0xFF; /* Sector count (3 bytes) */
-    cdb[7] = (sector_count >> 8)  & 0xFF;
-    cdb[8] = sector_count & 0xFF;
-    cdb[9] = 0x10;                  /* Header Code: User Data only (2352 bytes/sector) */
-
+    struct lv2_atapi_cmnd_block cmd __attribute__((aligned(16)));
+    memset(&cmd, 0, sizeof(cmd));
     uint32_t total_bytes = sector_count * CD_SECTOR_SIZE_RAW;
-    s32 ret = sys_storage_send_device_command(s_drive_fd, PS3_SCSI_CMD_EXECUTE,
-                                              cdb, sizeof(cdb),
-                                              out_buffer, total_bytes);
+
+    cmd.pkt[0] = SCSI_CMD_READ_CD;
+    cmd.pkt[1] = 0x04; /* CD-DA */
+    cmd.pkt[2] = (uint8_t)((lba >> 24) & 0xFF);
+    cmd.pkt[3] = (uint8_t)((lba >> 16) & 0xFF);
+    cmd.pkt[4] = (uint8_t)((lba >> 8)  & 0xFF);
+    cmd.pkt[5] = (uint8_t)(lba & 0xFF);
+    cmd.pkt[6] = (uint8_t)((sector_count >> 16) & 0xFF);
+    cmd.pkt[7] = (uint8_t)((sector_count >> 8)  & 0xFF);
+    cmd.pkt[8] = (uint8_t)(sector_count & 0xFF);
+    cmd.pkt[9] = 0x10; /* User data only (2352 bytes) */
+    cmd.pkt[10] = 0x00;
+    cmd.pkt[11] = 0x00;
+
+    cmd.pktlen     = 12;
+    cmd.blocks     = sector_count;
+    cmd.block_size = CD_SECTOR_SIZE_RAW;
+    cmd.proto      = 3; /* PIO Data-In */
+    cmd.in_out     = 1; /* Read */
+    cmd.unknown    = 0;
+
+    int ret = (int)lv2syscall6(SYS_STORAGE_SEND_DEVICE_COMMAND,
+                               (uint64_t)s_device_handle, 0x01,
+                               (uint64_t)(uintptr_t)&cmd, sizeof(cmd),
+                               (uint64_t)(uintptr_t)out_buffer, total_bytes);
     if (ret != 0) {
-        /* Fallback: attempt direct block read if SCSI BE is restricted */
-        u32 sectors_read = 0;
-        ret = sys_storage_read(s_drive_fd, lba, sector_count, out_buffer, &sectors_read, 0);
-        if (ret != 0) {
-            printf("[CD_DRIVE] Audio sector read failed at LBA %u: 0x%08X\n", lba, ret);
-            return -1;
-        }
+        printf("[CD_DRIVE] Audio sector read failed at LBA %u: 0x%08X\n", lba, ret);
+        return -1;
     }
     return 0;
 #else
@@ -230,7 +291,6 @@ int cd_drive_read_audio_sectors(uint32_t lba, uint32_t sector_count, uint8_t *ou
     uint32_t total_samples = sector_count * (CD_SECTOR_SIZE_RAW / 4);
     int16_t *pcm16 = (int16_t *)out_buffer;
     for (uint32_t i = 0; i < total_samples; i++) {
-        /* 44100 Hz sample rate, 440 Hz concert pitch A */
         double phase = (double)(lba * 588 + i) * 2.0 * 3.141592653589793 * 440.0 / 44100.0;
         int16_t sample = (int16_t)(sin(phase) * 16000.0);
         pcm16[i * 2] = sample;     /* Left */

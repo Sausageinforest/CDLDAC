@@ -1,4 +1,4 @@
-name: Build PS3 Package (PKG)
+name: Build PS3 PKG
 
 on:
   push:
@@ -7,21 +7,28 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-pkg:
+  build:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/ps3dev/ps3dev:latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build PS3 Application and Package
+      - name: Compile PKG via PS3DEV Docker
         run: |
-          make
+          docker run --rm -v ${{ github.workspace }}:/build -w /build hldtux/ps3dev make pkg
+          mkdir -p CDPL00001/USRDIR/assets CDPL00001/USRDIR/cache
+          cp pkg/PARAM.SFO CDPL00001/
+          cp pkg/ICON0.PNG CDPL00001/
+          cp pkg/PIC1.PNG CDPL00001/
+          cp assets/font.ttf CDPL00001/USRDIR/assets/
+          cp assets/default_cover.png CDPL00001/USRDIR/assets/
+          if [ -f CDPL00001.self ]; then cp CDPL00001.self CDPL00001/USRDIR/EBOOT.BIN; fi
+          if [ -f build/CDPL00001.pkg ]; then cp build/CDPL00001.pkg CDPL00001.pkg; fi
 
-      - name: Upload PKG Artifact
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CDPL00001.pkg
-          path: CDPL00001.pkg
+          name: CDPL00001-PS3-Package
+          path: |
+            *.pkg
+            CDPL00001/
