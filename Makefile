@@ -50,23 +50,23 @@ $(TARGET).elf: $(OBJS)
 	@echo "LD $@"
 	@$(CC) $(LDFLAGS) $(OBJS) $(LIBPSL1GHT_LIB) -Wl,--start-group $(LIBS) -Wl,--end-group -o $@
 
-$(TARGET).pkg: $(TARGET).self
+$(TARGET).pkg: $(TARGET).elf $(TARGET).self
 	@echo "Packaging $(TARGET).pkg..."
 	@rm -rf build/pkg
 	@mkdir -p build/pkg/USRDIR/assets build/pkg/USRDIR/cache
 	@cp -f pkg/ICON0.PNG build/pkg/ICON0.PNG
 	@cp -f pkg/PIC1.PNG build/pkg/PIC1.PNG
-	@cp -f pkg/PARAM.SFO build/pkg/PARAM.SFO
+	@if [ -f pkg/sfo.xml ] && which sfo >/dev/null 2>&1; then \
+		sfo -f pkg/sfo.xml build/pkg/PARAM.SFO ; \
+	else \
+		cp -f pkg/PARAM.SFO build/pkg/PARAM.SFO ; \
+	fi
 	@cp -f assets/default_cover.png build/pkg/USRDIR/assets/
 	@cp -f assets/font.ttf build/pkg/USRDIR/assets/
-	@cp -f $(TARGET).self build/pkg/USRDIR/EBOOT.BIN
-	@if [ -f pkg/package.conf ]; then \
-		pkg --contentid $(CONTENTID) build/pkg/ $(TARGET).pkg 2>/dev/null || pkg pkg/package.conf build/pkg/ $(TARGET).pkg ; \
-	else \
-		pkg --contentid $(CONTENTID) build/pkg/ $(TARGET).pkg ; \
-	fi
-	@which package_finalize >/dev/null 2>&1 && package_finalize $(TARGET).pkg || true
-	@cp -f $(TARGET).pkg $(TARGET).gnpdrm.pkg 2>/dev/null || true
+	@make_self_npdrm $(TARGET).elf build/pkg/USRDIR/EBOOT.BIN $(CONTENTID) || cp -f $(TARGET).self build/pkg/USRDIR/EBOOT.BIN
+	@pkg --contentid $(CONTENTID) build/pkg/ $(TARGET).pkg
+	@cp -f $(TARGET).pkg $(TARGET).gnpdrm.pkg
+	@which package_finalize >/dev/null 2>&1 && package_finalize $(TARGET).gnpdrm.pkg || true
 
 else
 # ------------------------------------------------------------------------------

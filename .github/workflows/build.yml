@@ -43,18 +43,16 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.1
-          name: "PS3 Audiophile CD Player v1.0.1 (CDPL00001)"
+          tag_name: v1.0.2
+          name: "PS3 Audiophile CD Player v1.0.2 (CDPL00001)"
           body: |
             Official PSL1GHT build of PS3 Audiophile CD Player homebrew (TitleID: CDPL00001).
 
-            ### Fixes in v1.0.1
-            - Fixed black screen / crash to XMB on launch (added sysModuleLoad for NET, IO, AUDIO, GCM_SYS, SYSUTIL)
-            - Fixed illegal instruction trap (`sc 2` replaced with standard lv2 storage syscalls)
-            - Fixed PPU thread priority from kernel range (100) to valid user range (1000)
-            - Fixed Tiny3D 2D projection and 848x512 coordinates
-            - Packaged as Type 4 CEX homebrew SELF (no RAP/RIF license check required on CFW/HEN)
-            - Finalized and signed PKG with bundled cover art and font assets
+            ### Fixes in v1.0.2
+            - Fixed "Corrupted Data" error in XMB by regenerating valid 1040-byte PARAM.SFO (CATEGORY: HG, BOOTABLE: 1, ATTRIBUTE: 0)
+            - Fixed packaging with proper NPDRM Free DRM EBOOT.BIN
+            - Both Debug PKG (`CDPL00001.pkg`) and Finalized PKG (`CDPL00001.gnpdrm.pkg`) provided
+            - Added `CDPL00001-folder.zip` for direct copy to `/dev_hdd0/game/CDPL00001/` via FTP or multiMAN
           files: |
             CDPL00001.pkg
             CDPL00001.gnpdrm.pkg
