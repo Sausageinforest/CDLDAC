@@ -19,7 +19,7 @@ jobs:
         run: |
           docker run --rm -v ${{ github.workspace }}:/build -w /build hldtux/ps3dev make clean pkg
           mkdir -p CDPL00001/USRDIR/assets CDPL00001/USRDIR/cache
-          cp pkg/PARAM.SFO CDPL00001/
+          if [ -f build/pkg/PARAM.SFO ]; then cp build/pkg/PARAM.SFO CDPL00001/ ; cp build/pkg/PARAM.SFO pkg/PARAM.SFO ; else cp pkg/PARAM.SFO CDPL00001/ ; fi
           cp pkg/ICON0.PNG CDPL00001/
           cp pkg/PIC1.PNG CDPL00001/
           cp assets/font.ttf CDPL00001/USRDIR/assets/
@@ -28,6 +28,12 @@ jobs:
           zip -r CDPL00001-folder.zip CDPL00001
           ls -la
           ls -la build/ || true
+
+      - name: Finalize Retail PKG for PS3HEN
+        run: |
+          pip install cryptography
+          python3 tools/package_finalize.py CDPL00001.pkg CDPL00001.gnpdrm.pkg
+          python3 -c "with open('CDPL00001.pkg', 'rb') as f: print('CDPL00001.pkg finalized byte 4:', hex(f.read(5)[4]))"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -43,22 +49,21 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.4
-          name: "PS3 Audiophile CD Player v1.0.4 (CDPL00001)"
+          tag_name: v1.0.5
+          name: "PS3 Audiophile CD Player v1.0.5 (CDPL00001)"
           body: |
             Official PSL1GHT build of PS3 Audiophile CD Player homebrew (TitleID: CDPL00001).
 
-            ### Critical Fixes in v1.0.4
-            - **Added `SYS_PROCESS_PARAM(1001, 0x100000)`**:
-              * Fixed LV2 kernel abort on boot! Without `.sys_proc_param`, PS3 GameOS aborts before calling `main()`.
-            - **Added `sprxlinker` ELF patching**:
-              * Resolved dynamic SPRX imports and relocations for PSL1GHT system libraries prior to SELF conversion.
-            - **Direct Retail Finalization (`package_finalize`)**:
-              * `CDPL00001.pkg` is now finalized directly as a retail package, allowing flawless execution on CFW (CEX) and PS3HEN.
-            - **Added `CDPL00001-fself.pkg`**:
-              * An additional package with homebrew FSELF `EBOOT.BIN` that bypasses NPDRM DRM checks entirely.
-            - **Expanded USB/HDD Logging Paths**:
-              * Writes to `/dev_usb000` through `/dev_usb007`, `/dev_hdd0/tmp/cdplayer.log`, and `/dev_hdd0/game/CDPL00001/debug.log`.
+            ### Critical Fixes in v1.0.5
+            - **Guaranteed Retail PKG Finalization**:
+              * Added standalone `package_finalize.py` step to decrypt debug payload and encrypt with retail keys (sets `0x80` finalize flag).
+              * Enables direct installation and execution on retail CEX consoles and PS3HEN without debug mode.
+            - **Direct Kernel LV2 Logging (`sysFsOpen`)**:
+              * Logger in `logger.c` now bypasses stdio/newlib and writes directly to LV2 kernel filesystem (`/dev_usb000`..`007`, `/dev_hdd0/tmp/cdplayer.log`).
+            - **Sysutil Callback System**:
+              * Registered `sysUtilRegisterCallback` and added `sysUtilCheckCallback` to main loop.
+            - **Updated PARAM.SFO**:
+              * Set `ATTRIBUTE: 165` and `PS3_SYSTEM_VER: 03.4000` matching standard PS3HEN homebrew configuration.
           files: |
             CDPL00001.pkg
             CDPL00001-fself.pkg

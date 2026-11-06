@@ -17,7 +17,20 @@
 
 #if defined(__PS3__) || defined(__PPU__)
 #include <sys/process.h>
+#include <sysutil/sysutil.h>
 SYS_PROCESS_PARAM(1001, 0x100000);
+
+static bool g_app_running = true;
+static void sysutil_exit_callback(u64 status, u64 param, void *usrdata) {
+    (void)param;
+    (void)usrdata;
+    if (status == SYSUTIL_EXIT_GAME) {
+        log_write("[SYSUTIL] SYSUTIL_EXIT_GAME received\n");
+        g_app_running = false;
+    }
+}
+#else
+static bool g_app_running = true;
 #endif
 
 static cd_toc_t g_toc;
@@ -63,9 +76,14 @@ int main(int argc, char *argv[]) {
 
     setvbuf(stdout, NULL, _IONBF, 0);
 
+#if defined(__PS3__) || defined(__PPU__)
+    sysUtilRegisterCallback(0, sysutil_exit_callback, NULL);
+#endif
+
     log_write("\n\n===================================================\n");
     log_write("   PS3 AUDIOPHILE CD PLAYER (TitleID: CDPL00001)   \n");
     log_write("===================================================\n");
+    log_write("[BOOT] main() started! Direct LV2 sysfs logging active.\n");
 
     /* 1. Subsystem Initialization */
     log_write("[INIT 1/6] Initializing Controller Input (ioPadInit)...\n");
@@ -111,7 +129,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* 3. Main Application Loop */
-    bool app_running = true;
+    g_app_running = true;
     controller_input_t input;
     audio_status_info_t audio_status;
     float vis_samples[VIS_FFT_SIZE];
@@ -119,7 +137,10 @@ int main(int argc, char *argv[]) {
     int frame_counter = 0;
     log_write("[MAIN] Entering main application loop\n");
 
-    while (app_running) {
+    while (g_app_running) {
+#if defined(__PS3__) || defined(__PPU__)
+        sysUtilCheckCallback();
+#endif
         /* Poll controller */
         input_poll(&input);
 
