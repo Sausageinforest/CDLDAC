@@ -15,7 +15,7 @@ jobs:
 
       - name: Compile PKG via PS3DEV Docker
         run: |
-          docker run --rm -v ${{ github.workspace }}:/build -w /build hldtux/ps3dev make pkg
+          docker run --rm -v ${{ github.workspace }}:/build -w /build hldtux/ps3dev make clean pkg
           mkdir -p CDPL00001/USRDIR/assets CDPL00001/USRDIR/cache
           cp pkg/PARAM.SFO CDPL00001/
           cp pkg/ICON0.PNG CDPL00001/
@@ -23,7 +23,8 @@ jobs:
           cp assets/font.ttf CDPL00001/USRDIR/assets/
           cp assets/default_cover.png CDPL00001/USRDIR/assets/
           if [ -f CDPL00001.self ]; then cp CDPL00001.self CDPL00001/USRDIR/EBOOT.BIN; fi
-          if [ -f build/CDPL00001.pkg ]; then cp build/CDPL00001.pkg CDPL00001.pkg; fi
+          ls -la
+          ls -la build/ || true
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -31,4 +32,5 @@ jobs:
           name: CDPL00001-PS3-Package
           path: |
             *.pkg
+            *.self
             CDPL00001/

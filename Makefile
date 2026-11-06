@@ -11,10 +11,8 @@ TITLE       := PS3 Audiophile CD Player
 APPID       := CDPL00001
 CONTENTID   := UP0001-$(APPID)_00-0000000000000000
 ICON0       := $(CURDIR)/pkg/ICON0.PNG
-
--include $(PSL1GHT)/ppu_rules
-
 TARGET      := CDPL00001
+
 SRCS        := src/main.c \
                src/cd_drive.c \
                src/discid.c \
@@ -25,16 +23,19 @@ SRCS        := src/main.c \
                src/input.c \
                src/cJSON.c
 
+OBJS        := $(SRCS:.c=.o)
 INCLUDES    := -Iinclude -Isrc
 
-ifneq ($(wildcard $(PS3DEV)/bin/powerpc-ps3-elf-gcc),)
+# Check if compiling under PS3 environment
+ifneq ($(wildcard $(PSL1GHT)/ppu_rules),)
 # ------------------------------------------------------------------------------
-# PS3 PSL1GHT Toolchain Target
+# PS3 Toolchain Environment
 # ------------------------------------------------------------------------------
-CC          := powerpc-ps3-elf-gcc
+include $(PSL1GHT)/ppu_rules
+
 CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDES) $(LIBPSL1GHT_INC)
 LDFLAGS     := $(MACHDEP)
-LIBS        := $(LIBPSL1GHT_LIB) -laudio -lio -lnet -lsysutil -lsysmodule -llv2 -lm
+LIBS        := -laudio -lio -lnet -lsysutil -lsysmodule -llv2 -lm
 
 # Detect Tiny3D if available
 ifneq ($(wildcard $(PS3DEV)/portlibs/ppu/include/tiny3d.h $(PSL1GHT)/include/tiny3d.h),)
@@ -42,24 +43,22 @@ LIBS        += -ltiny3d
 CFLAGS      += -DHAVE_TINY3D
 endif
 
-OBJS        := $(SRCS:.c=.ppu.o)
-
 .PHONY: all pkg clean test host
 
 all: $(TARGET).self
 pkg: $(TARGET).pkg
 
-%.ppu.o: %.c
+src/%.o: src/%.c
 	@echo "CC $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET).elf: $(OBJS)
 	@echo "LD $@"
-	@$(CC) $(LDFLAGS) $(OBJS) $(LIBS) -o $@
+	@$(CC) $(LDFLAGS) $(OBJS) $(LIBPSL1GHT_LIB) $(LIBS) -o $@
 
 else
 # ------------------------------------------------------------------------------
-# Host Target for Testing / Verification
+# Host Environment (Testing / Verification)
 # ------------------------------------------------------------------------------
 CC          := clang
 HOST_CFLAGS := -O2 -Wall $(INCLUDES)
@@ -77,4 +76,4 @@ test: tests/test_suite.c src/cd_drive.c src/discid.c src/metadata.c src/visualiz
 	@./run_tests
 
 clean:
-	rm -rf *.o src/*.o src/*.ppu.o build $(TARGET).elf $(TARGET).self $(TARGET).pkg ps3-cd-player-host run_tests cache
+	rm -rf *.o src/*.o build $(TARGET).elf $(TARGET).self $(TARGET).pkg ps3-cd-player-host run_tests cache
