@@ -10,10 +10,25 @@
 #if defined(__PS3__) || defined(__PPU__)
 #if defined(__has_include)
 #if __has_include(<tiny3d.h>)
-#define HAVE_TINY3D 1
 #include <tiny3d.h>
 #endif
 #endif
+
+#ifndef TINY3D_QUADS
+#define TINY3D_QUADS 3
+#endif
+
+#ifndef TINY3D_CLEAR_ALL
+#define TINY3D_CLEAR_ALL 3
+#endif
+
+void tiny3d_Init(uint32_t flags) __attribute__((weak));
+void tiny3d_Clear(uint32_t rgba, uint32_t flags) __attribute__((weak));
+void tiny3d_Flip(void) __attribute__((weak));
+void tiny3d_Polygon(int type) __attribute__((weak));
+void tiny3d_End(void) __attribute__((weak));
+void tiny3d_VertexPos(float x, float y, float z) __attribute__((weak));
+void tiny3d_SetPolygonColor(uint32_t rgba) __attribute__((weak));
 
 static int s_ps3_gfx_ready = 0;
 #endif
@@ -46,10 +61,10 @@ int ui_init(void) {
     s_ui_state.is_720p = false;
 
 #if defined(__PS3__) || defined(__PPU__)
-#if defined(HAVE_TINY3D)
-    tiny3d_Init(1024 * 1024);
-    s_ps3_gfx_ready = 1;
-#endif
+    if (tiny3d_Init) {
+        tiny3d_Init(1024 * 1024);
+        s_ps3_gfx_ready = 1;
+    }
 #endif
 
     /* Load default cover image */
@@ -145,9 +160,10 @@ int ui_update_cover_art(const uint8_t *img_bytes, int img_size) {
 }
 
 /* Drawing primitives for Tiny3D / RSX hardware acceleration */
-#if (defined(__PS3__) || defined(__PPU__)) && defined(HAVE_TINY3D)
+#if defined(__PS3__) || defined(__PPU__)
 
 static void draw_rect(float x, float y, float w, float h, uint32_t color) {
+    if (!tiny3d_Polygon || !tiny3d_SetPolygonColor || !tiny3d_VertexPos || !tiny3d_End) return;
     tiny3d_Polygon(TINY3D_QUADS);
     tiny3d_SetPolygonColor(color);
     tiny3d_VertexPos(x, y, 65535);
@@ -158,6 +174,7 @@ static void draw_rect(float x, float y, float w, float h, uint32_t color) {
 }
 
 static void draw_rect_gradient(float x, float y, float w, float h, uint32_t col_top, uint32_t col_bot) {
+    if (!tiny3d_Polygon || !tiny3d_SetPolygonColor || !tiny3d_VertexPos || !tiny3d_End) return;
     tiny3d_Polygon(TINY3D_QUADS);
     tiny3d_SetPolygonColor(col_top);
     tiny3d_VertexPos(x, y, 65535);
@@ -186,8 +203,8 @@ void ui_render(const album_metadata_t *meta,
         if (progress > 1.0f) progress = 1.0f;
     }
 
-#if (defined(__PS3__) || defined(__PPU__)) && defined(HAVE_TINY3D)
-    if (!s_ps3_gfx_ready) return;
+#if defined(__PS3__) || defined(__PPU__)
+    if (!s_ps3_gfx_ready || !tiny3d_Clear) return;
 
     tiny3d_Clear(0xFF0D1117, TINY3D_CLEAR_ALL); /* Audiophile deep dark slate */
 
@@ -293,7 +310,7 @@ void ui_render(const album_metadata_t *meta,
         }
     }
 
-    tiny3d_Flip();
+    if (tiny3d_Flip) tiny3d_Flip();
 #else
     /* Non-PS3 terminal / console simulation output */
     static int s_frame_counter = 0;

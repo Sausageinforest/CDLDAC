@@ -38,9 +38,8 @@ LDFLAGS     := $(MACHDEP)
 LIBS        := -laudio -lio -lnet -lsysutil -lsysmodule -llv2 -lm
 
 # Detect Tiny3D if available
-ifneq ($(wildcard $(PS3DEV)/portlibs/ppu/include/tiny3d.h $(PSL1GHT)/include/tiny3d.h),)
+ifneq ($(wildcard $(PS3DEV)/portlibs/ppu/lib/libtiny3d.a $(PSL1GHT)/lib/libtiny3d.a),)
 LIBS        += -ltiny3d
-CFLAGS      += -DHAVE_TINY3D
 endif
 
 .PHONY: all pkg clean test host
