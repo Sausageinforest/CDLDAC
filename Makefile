@@ -33,8 +33,8 @@ ifneq ($(wildcard $(PSL1GHT)/ppu_rules),)
 # ------------------------------------------------------------------------------
 include $(PSL1GHT)/ppu_rules
 
-CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDES) $(LIBPSL1GHT_INC)
-LDFLAGS     := $(MACHDEP)
+CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDES) -I$(PS3DEV)/portlibs/ppu/include $(LIBPSL1GHT_INC)
+LDFLAGS     := $(MACHDEP) -L$(PS3DEV)/portlibs/ppu/lib -L$(PSL1GHT)/lib
 LIBS        := -laudio -lio -lnet -lsysutil -lsysmodule -llv2 -lm
 
 # Detect Tiny3D if available
