@@ -80,6 +80,7 @@ $(TARGET).pkg: $(TARGET).elf $(TARGET).self
 	@cp -f $(TARGET).pkg $(TARGET).gnpdrm.pkg
 	@cp -f $(TARGET).self build/pkg/USRDIR/EBOOT.BIN
 	@pkg --contentid $(CONTENTID) build/pkg/ $(TARGET)-fself.pkg || true
+	@which package_finalize >/dev/null 2>&1 && package_finalize $(TARGET)-fself.pkg || true
 
 else
 # ------------------------------------------------------------------------------
