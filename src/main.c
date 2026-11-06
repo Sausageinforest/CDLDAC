@@ -22,7 +22,7 @@ static char g_freedb_id[16] = {0};
 static album_metadata_t g_meta;
 static visualizer_t g_vis;
 static bool g_has_disc = false;
-static char g_status_msg[128] = "Initializing PS3 CD Player...";
+static char g_status_msg[512] = "Initializing PS3 CD Player...";
 
 static void load_current_disc(void) {
     if (cd_drive_read_toc(&g_toc) != 0) {

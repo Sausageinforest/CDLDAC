@@ -14,8 +14,8 @@
 #endif
 #endif
 
-#ifndef TINY3D_POLYGON_QUADS
-#define TINY3D_POLYGON_QUADS 3
+#ifndef TINY3D_QUADS
+#define TINY3D_QUADS 3
 #endif
 
 #ifndef TINY3D_CLEAR_ALL
@@ -157,9 +157,9 @@ int ui_update_cover_art(const uint8_t *img_bytes, int img_size) {
 #if defined(__PS3__) || defined(__PPU__)
 
 static void draw_rect(float x, float y, float w, float h, uint32_t color) {
-    tiny3d_Polygon(TINY3D_POLYGON_QUADS);
-    tiny3d_SetPolygonColor(color);
+    tiny3d_SetPolygon(TINY3D_QUADS);
     tiny3d_VertexPos(x, y, 65535);
+    tiny3d_VertexColor(color);
     tiny3d_VertexPos(x + w, y, 65535);
     tiny3d_VertexPos(x + w, y + h, 65535);
     tiny3d_VertexPos(x, y + h, 65535);
@@ -167,13 +167,15 @@ static void draw_rect(float x, float y, float w, float h, uint32_t color) {
 }
 
 static void draw_rect_gradient(float x, float y, float w, float h, uint32_t col_top, uint32_t col_bot) {
-    tiny3d_Polygon(TINY3D_POLYGON_QUADS);
-    tiny3d_SetPolygonColor(col_top);
+    tiny3d_SetPolygon(TINY3D_QUADS);
     tiny3d_VertexPos(x, y, 65535);
+    tiny3d_VertexColor(col_top);
     tiny3d_VertexPos(x + w, y, 65535);
-    tiny3d_SetPolygonColor(col_bot);
+    tiny3d_VertexColor(col_top);
     tiny3d_VertexPos(x + w, y + h, 65535);
+    tiny3d_VertexColor(col_bot);
     tiny3d_VertexPos(x, y + h, 65535);
+    tiny3d_VertexColor(col_bot);
     tiny3d_End();
 }
 
